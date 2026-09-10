@@ -1,6 +1,7 @@
 """Model conversion module — converts HuggingFace models to MLX format."""
 
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -139,16 +140,26 @@ def convert_model(
     output_dir.mkdir(parents=True, exist_ok=True)
     results: list[ConversionResult] = []
 
+    try:
+        from huggingface_hub import snapshot_download
+
+        console.print(f"  Ensuring complete repository snapshot for {model_id}...")
+        snapshot_download(model_id)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[yellow]Warning: Pre-download snapshot check skipped: {e}[/yellow]")
+
     for quant in sorted(quants):
         quant_label = f"{quant}bit"
         output_path = output_dir / f"{model_name}-mlx-{quant_label}"
 
-        if output_path.exists() and not force:
-            console.print(
-                f"[yellow]⚠ Skipping {quant_label}: "
-                f"output already exists at {output_path}. Use --force to overwrite.[/yellow]"
-            )
-            continue
+        if output_path.exists():
+            if not force:
+                console.print(
+                    f"[yellow]⚠ Skipping {quant_label}: "
+                    f"output already exists at {output_path}. Use --force to overwrite.[/yellow]"
+                )
+                continue
+            shutil.rmtree(output_path)
 
         console.print(f"\n[bold blue]Converting {model_id} to {quant_label}...[/bold blue]")
 
