@@ -211,7 +211,7 @@ def convert_model(
             "conversion_time_seconds": round(elapsed, 2),
             "output_size_bytes": output_size,
             "timestamp": now_iso(),
-            "command": " ".join(cmd),
+            "command": " ".join(["python3"] + cmd[1:]),
         }
 
         output_path.mkdir(parents=True, exist_ok=True)

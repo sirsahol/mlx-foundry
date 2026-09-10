@@ -104,8 +104,8 @@ def generate_model_card(
     env = Environment(
         loader=PackageLoader("mlx_foundry", "templates"),
         keep_trailing_newline=True,
-        trim_blocks=False,
-        lstrip_blocks=False,
+        trim_blocks=True,
+        lstrip_blocks=True,
     )
     template = env.get_template("model_card.md.j2")
     rendered = template.render(**context)
