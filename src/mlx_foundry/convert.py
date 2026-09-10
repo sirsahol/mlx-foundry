@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -156,7 +157,7 @@ def convert_model(
         # Build the mlx_lm.convert command
         # For 16-bit, we don't pass -q (no quantization)
         cmd = [
-            "python3",
+            sys.executable,
             "-m",
             "mlx_lm.convert",
             "--hf-path",
