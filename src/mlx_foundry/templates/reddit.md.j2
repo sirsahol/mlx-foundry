@@ -1,0 +1,40 @@
+# {{ model_name }} — MLX conversion for Apple Silicon
+
+Hey r/LocalLLaMA! I've converted **{{ source_model }}** to Apple MLX format with full benchmarks.
+
+## Available Variants
+
+{% for qr in all_quant_repos %}
+- [{{ qr.quant_bits }}-bit]({{ qr.url }})
+{% endfor %}
+
+{% if benchmark %}
+## Benchmarks ({{ benchmark.chip }}, {{ benchmark.memory_gb }}GB RAM)
+
+| Metric | Value |
+|--------|-------|
+| Tokens/sec | {{ benchmark.tokens_per_second }} |
+| TTFT | {{ benchmark.time_to_first_token_ms }}ms |
+| Peak Memory | {{ benchmark.peak_memory_mb }}MB |
+| Quantization | {{ quant_bits }}-bit |
+{% endif %}
+
+## Quick Start
+
+```bash
+pip install mlx-lm
+mlx_lm.chat --model {{ hf_repo }}
+```
+
+## Who Should Use This?
+
+- **M1/M2 8GB**: Use the 4-bit version
+- **M1/M2 Pro 16-32GB**: Use the 8-bit version
+- **M2/M3 Ultra 64GB+**: Use the 16-bit version
+
+Source model: [{{ source_model }}](https://huggingface.co/{{ source_model }})
+
+Feedback welcome! Let me know if there are other models you'd like converted.
+
+---
+*Converted with [MLX Foundry](https://github.com/SirSahOl/mlx-foundry)*

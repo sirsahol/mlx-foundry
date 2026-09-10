@@ -1,0 +1,159 @@
+---
+library_name: mlx
+pipeline_tag: {{ source_info.get('pipeline_tag', 'text-generation') }}
+license: {{ source_info.get('license', 'unknown') }}
+base_model: {{ source_model }}
+{% if quant_bits < 16 %}
+base_model_relation: quantized
+{% endif %}
+tags:
+  - mlx
+  - safetensors
+{% if quant_bits < 16 %}
+  - {{ quant_bits }}-bit
+{% endif %}
+{% if 'conversational' in source_info.get('tags', []) or 'chat' in model_name.lower() %}
+  - conversational
+{% endif %}
+---
+
+# {{ model_name }}
+
+> {{ quant_bits }}-bit MLX conversion of [{{ source_model }}](https://huggingface.co/{{ source_model }}) for Apple Silicon.
+
+**Converted by**: [{{ author }}](https://huggingface.co/{{ author }})
+**Source model**: [{{ source_model }}](https://huggingface.co/{{ source_model }})
+**Framework**: [MLX](https://github.com/ml-explore/mlx) by Apple
+**Quantization**: {{ quant_bits }}-bit
+**Format**: safetensors
+**License**: {{ source_info.get('license', 'See source model') }}
+
+---
+
+## Quick Start
+
+### Installation
+
+```bash
+pip install mlx-lm
+```
+
+### CLI Usage
+
+```bash
+# Chat interactively
+mlx_lm.chat --model {{ hf_repo }}
+
+# Generate text
+mlx_lm.generate --model {{ hf_repo }} --prompt "Your prompt here"
+```
+
+### Python Usage
+
+```python
+from mlx_lm import load, generate
+
+model, tokenizer = load("{{ hf_repo }}")
+response = generate(model, tokenizer, prompt="Your prompt here", max_tokens=256)
+print(response)
+```
+
+---
+
+## Performance Benchmarks
+
+{% if benchmark_results %}
+| Metric | {% for br in benchmark_results %}{{ br.get('quant_bits', '?') }}-bit | {% endfor %}
+|--------|{% for br in benchmark_results %}--------|{% endfor %}
+| **Tokens/sec** | {% for br in benchmark_results %}{{ br.get('tokens_per_second', 'N/A') }} | {% endfor %}
+| **TTFT** | {% for br in benchmark_results %}{{ br.get('time_to_first_token_ms', 'N/A') }} ms | {% endfor %}
+| **Peak Memory** | {% for br in benchmark_results %}{{ br.get('peak_memory_mb', 'N/A') }} MB | {% endfor %}
+{% if benchmark_results[0].get('perplexity') %}
+| **Perplexity** | {% for br in benchmark_results %}{{ br.get('perplexity', 'N/A') }} | {% endfor %}
+{% endif %}
+
+> Benchmarked on **{{ benchmark_results[0].get('chip', 'Apple Silicon') }}** with **{{ benchmark_results[0].get('memory_gb', '?') }}GB** unified memory.
+> Average over {{ benchmark_results[0].get('num_runs', '?') }} runs with {{ benchmark_results[0].get('max_tokens', '?') }} max tokens.
+{% else %}
+*Benchmarks coming soon.*
+{% endif %}
+
+---
+
+## Who Should Use This?
+
+| Your Hardware | Recommended Quantization |
+|---------------|--------------------------|
+| M1/M2 (8GB) | **4-bit** — Best balance of quality and memory usage |
+| M1/M2 Pro/Max (16-32GB) | **8-bit** — Higher quality with reasonable memory |
+| M2/M3/M4 Ultra (64GB+) | **16-bit** — Full precision, no quality loss |
+
+**General guidance:**
+- Use **4-bit** if you want to run this model alongside other applications
+- Use **8-bit** if you have the memory and want better quality
+- Use **16-bit** for research, evaluation, or if memory isn't a concern
+
+---
+
+## Other Quantization Variants
+
+{% if all_quant_repos %}
+| Variant | Link |
+|---------|------|
+{% for qr in all_quant_repos %}
+| {{ qr['quant_bits'] }}-bit | [{{ qr['repo'] }}]({{ qr['url'] }}) |
+{% endfor %}
+{% endif %}
+
+---
+
+## Conversion Details
+
+{% if conversion_meta %}
+| Property | Value |
+|----------|-------|
+| **Source Model** | [{{ source_model }}](https://huggingface.co/{{ source_model }}) |
+| **Quantization** | {{ quant_bits }}-bit |
+| **mlx-lm Version** | {{ conversion_meta.get('mlx_lm_version', 'N/A') }} |
+| **Conversion Time** | {{ conversion_meta.get('conversion_time_seconds', 'N/A') }}s |
+| **Output Size** | {{ model_size }} |
+| **Date** | {{ conversion_meta.get('timestamp', 'N/A') }} |
+
+### Reproduction
+
+To reproduce this conversion:
+
+```bash
+pip install mlx-lm=={{ conversion_meta.get('mlx_lm_version', 'latest') }}
+{{ conversion_meta.get('command', 'mlx_lm.convert --hf-path ' + source_model) }}
+```
+{% endif %}
+
+---
+
+## Limitations & Known Issues
+
+- Performance may degrade with very long contexts (>8K tokens) at lower quantization levels.
+- This is a weight-only conversion; the model architecture and behavior are inherited from the source model.
+- Quantization introduces a small quality loss compared to the original model. Lower bit counts = more loss.
+- This model requires Apple Silicon (M1 or later) to run with MLX.
+
+---
+
+## License
+
+This model conversion inherits the license of the source model: **{{ source_info.get('license', 'See source model') }}**.
+
+See the [original model card](https://huggingface.co/{{ source_model }}) for full license details.
+
+---
+
+## Changelog
+
+| Version | Date | Changes |
+|---------|------|---------|
+| v1.0 | {{ conversion_meta.get('timestamp', 'N/A')[:10] if conversion_meta.get('timestamp') else 'N/A' }} | Initial conversion |
+
+---
+
+*Converted with [MLX Foundry](https://github.com/SirSahOl/mlx-foundry) — a professional pipeline for converting models to Apple MLX format.*

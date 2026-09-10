@@ -1,0 +1,14 @@
+🔥 Just published {{ model_name }} for Apple Silicon (MLX)!
+
+{% if benchmark %}
+📊 {{ benchmark.tokens_per_second }} tok/s on {{ benchmark.chip }} ({{ quant_bits }}-bit)
+💾 Peak memory: {{ benchmark.peak_memory_mb }}MB
+{% endif %}
+
+Available in {% for qr in all_quant_repos %}{{ qr.quant_bits }}-bit{% if not loop.last %}, {% endif %}{% endfor %} quantizations.
+
+🤗 {{ hf_url }}
+
+Converted from @{{ source_author }}'s original model using mlx-lm.
+
+#MLX #AppleSilicon #LocalLLM #AI #HuggingFace
