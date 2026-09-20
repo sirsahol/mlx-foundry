@@ -9,24 +9,39 @@ base_model_relation: quantized
 tags:
   - mlx
   - safetensors
+  - apple-silicon
 {% if quant_bits < 16 %}
   - {{ quant_bits }}-bit
 {% endif %}
-{% if 'conversational' in source_info.get('tags', []) or 'chat' in model_name.lower() %}
+{% if 'conversational' in source_info.get('tags', []) or 'chat' in model_name.lower() or 'instruct' in model_name.lower() %}
   - conversational
 {% endif %}
+{% for tag in extra_tags %}
+  - {{ tag }}
+{% endfor %}
 ---
 
 # {{ model_name }}
 
-> {{ quant_bits }}-bit MLX conversion of [{{ source_model }}](https://huggingface.co/{{ source_model }}) for Apple Silicon.
+> {{ quant_bits }}-bit MLX conversion of [{{ source_model }}](https://huggingface.co/{{ source_model }}) optimized for Apple Silicon native GPU inference.
 
-**Converted by**: [{{ author }}](https://huggingface.co/{{ author }})
-**Source model**: [{{ source_model }}](https://huggingface.co/{{ source_model }})
-**Framework**: [MLX](https://github.com/ml-explore/mlx) by Apple
-**Quantization**: {{ quant_bits }}-bit
-**Format**: safetensors
-**License**: {{ source_info.get('license', 'See source model') }}
+**Converted by**: [{{ author }}](https://huggingface.co/{{ author }})  
+**Source Model**: [{{ source_model }}](https://huggingface.co/{{ source_model }})  
+**Framework**: [MLX](https://github.com/ml-explore/mlx) by Apple  
+**Quantization**: {{ quant_bits }}-bit (Average {{ model_details.get('avg_bits_per_weight', quant_bits ~ '.00') }} bits per weight)  
+**Format**: safetensors  
+**License**: {{ source_info.get('license', 'See source model') }}  
+
+---
+
+## Model Details
+
+*   **Architecture**: {{ model_details.get('architecture', 'Transformer Causal LM') }}
+*   **Parameters**: {{ model_details.get('parameters', 'N/A') }}
+*   **Context Length**: {{ model_details.get('context_length', '32,768 tokens') }}
+*   **Format**: MLX (Apple Silicon native GPU format)
+*   **Quantization**: {{ quant_bits }}-bit (Average {{ model_details.get('avg_bits_per_weight', quant_bits ~ '.00') }} bits per weight)
+*   **Active VRAM Footprint**: ~{{ model_details.get('vram_footprint', model_size) }} (Minimum recommended: {{ model_details.get('min_ram', '16 GB Unified Memory') }})
 
 ---
 
@@ -35,34 +50,57 @@ tags:
 ### Installation
 
 ```bash
+{% if is_diffusion %}
+pip install mflux
+{% else %}
 pip install mlx-lm
+{% endif %}
 ```
 
-### CLI Usage
+### Usage
+
+{% if is_diffusion %}
+```bash
+# Generate image from text prompt
+mflux-generate-qwen --model {{ hf_repo }} --prompt "A serene landscape at dusk with cinematic lighting"
+```
+{% else %}
+#### CLI
 
 ```bash
 # Chat interactively
 mlx_lm.chat --model {{ hf_repo }}
 
 # Generate text
-mlx_lm.generate --model {{ hf_repo }} --prompt "Your prompt here"
+mlx_lm.generate --model {{ hf_repo }} --prompt "Write a short poem about artificial intelligence."
 ```
 
-### Python Usage
+#### Python API (with Chat Template)
 
 ```python
 from mlx_lm import load, generate
 
 model, tokenizer = load("{{ hf_repo }}")
-response = generate(model, tokenizer, prompt="Your prompt here", max_tokens=256)
+
+messages = [
+    {"role": "user", "content": "Explain quantum superposition in simple terms."}
+]
+prompt = tokenizer.apply_chat_template(
+    messages, tokenize=False, add_generation_prompt=True
+)
+
+response = generate(model, tokenizer, prompt=prompt, verbose=True)
 print(response)
 ```
+{% endif %}
 
 ---
 
 ## Performance Benchmarks
 
 {% if benchmark_results %}
+### Measured Benchmarks ({{ benchmark_results[0].get('chip', 'Apple Silicon') }})
+
 | Metric | {% for br in benchmark_results %}{{ br.get('quant_bits', '?') }}-bit | {% endfor %}
 |--------|{% for br in benchmark_results %}--------|{% endfor %}
 | **Tokens/sec** | {% for br in benchmark_results %}{{ br.get('tokens_per_second', 'N/A') }} | {% endfor %}
@@ -74,9 +112,43 @@ print(response)
 
 > Benchmarked on **{{ benchmark_results[0].get('chip', 'Apple Silicon') }}** with **{{ benchmark_results[0].get('memory_gb', '?') }}GB** unified memory.
 > Average over {{ benchmark_results[0].get('num_runs', '?') }} runs with {{ benchmark_results[0].get('max_tokens', '?') }} max tokens.
+
+### Apple Silicon Hardware Sizing Matrix
+
+Estimated decoding throughput, time-to-first-token (TTFT), and active unified memory footprint across Apple Silicon tiers:
+
+| Apple Silicon Tier | Unified Memory | Active VRAM | Estimated Speed | Est. TTFT | Recommended Use Case |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+{% for row in hardware_matrix %}
+| **{{ row.tier }}** | {{ row.ram }} | {{ row.vram }} | **{{ row.speed }}** | {{ row.ttft }} | {{ row.use_case }} |
+{% endfor %}
+
+> *Performance figures reflect memory bandwidth saturation on Apple Silicon unified memory architecture during autoregressive generation.*
 {% else %}
-*Benchmarks coming soon.*
+### Apple Silicon Hardware Sizing Matrix
+
+Estimated decoding throughput, time-to-first-token (TTFT), and active unified memory footprint across Apple Silicon tiers:
+
+| Apple Silicon Tier | Unified Memory | Active VRAM | Estimated Speed | Est. TTFT | Recommended Use Case |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+{% for row in hardware_matrix %}
+| **{{ row.tier }}** | {{ row.ram }} | {{ row.vram }} | **{{ row.speed }}** | {{ row.ttft }} | {{ row.use_case }} |
+{% endfor %}
+
+> *Estimates based on Apple Silicon unified memory bandwidth and active parameter footprint. Real-world speeds may vary with context length.*
 {% endif %}
+
+---
+
+## Multi-Quantization Comparison
+
+Evaluate your hardware budget and choose the optimal precision:
+
+| Variant | Disk Size | VRAM Footprint | Target Apple Silicon Hardware | Key Advantage |
+| :--- | :--- | :--- | :--- | :--- |
+{% for row in quant_comparison %}
+| {{ row.label }} | {{ row.disk_size }} | {{ row.vram }} | {{ row.target_hardware }} | {{ row.advantage }} |
+{% endfor %}
 
 ---
 
@@ -84,14 +156,14 @@ print(response)
 
 | Your Hardware | Recommended Quantization |
 |---------------|--------------------------|
-| M1/M2 (8GB) | **4-bit** — Best balance of quality and memory usage |
-| M1/M2 Pro/Max (16-32GB) | **8-bit** — Higher quality with reasonable memory |
-| M2/M3/M4 Ultra (64GB+) | **16-bit** — Full precision, no quality loss |
+| M1/M2/M3/M4 (8GB – 16GB) | **4-bit** — Best balance of speed, low memory, and multitasking capability |
+| M1/M2/M3/M4 Pro/Max (18GB – 36GB) | **8-bit** — Higher quality reasoning with comfortable memory headroom |
+| M1/M2/M3/M4 Max/Ultra (36GB – 192GB) | **16-bit** — Unquantized full precision, zero quality degradation |
 
 **General guidance:**
-- Use **4-bit** if you want to run this model alongside other applications
-- Use **8-bit** if you have the memory and want better quality
-- Use **16-bit** for research, evaluation, or if memory isn't a concern
+- Use **4-bit** if you want to run this model alongside IDEs, browsers, and background development tools.
+- Use **8-bit** if you have 16GB+ unified memory and require superior reasoning and code accuracy.
+- Use **16-bit** for research, benchmarking, evaluation, or high-end workstation deployments.
 
 ---
 
@@ -103,7 +175,97 @@ print(response)
 {% for qr in all_quant_repos %}
 | {{ qr['quant_bits'] }}-bit | [{{ qr['repo'] }}]({{ qr['url'] }}) |
 {% endfor %}
+{% else %}
+| Variant | Link |
+|---------|------|
+{% for row in quant_comparison %}
+| {{ row.bits }}-bit | [{{ row.repo }}]({{ row.url }}) |
+{% endfor %}
 {% endif %}
+
+---
+
+## LM Studio & Local Inference Setup Guide
+
+To prevent runaway loops and ensure correct conversational turn-taking, configure custom stop strings in your local inference runtime.
+
+### Custom Stop Strings Configuration
+
+Ensure the following sequence tokens are configured as strict stop boundaries:
+
+{% for st in chat_config.get('stop_tokens', ['<|im_start|>', '<|im_end|>', '<|endoftext|>']) %}
+{{ loop.index }}. `{{ st }}`
+{% endfor %}
+
+### Option A: Automatic Preset (Recommended for LM Studio)
+
+Create a custom prompt preset JSON file named `{{ chat_config.get('preset_name', 'Preset') }}.json` in your LM Studio config directory:
+- **macOS / Linux**: `~/.lmstudio/config-presets/{{ chat_config.get('preset_name', 'Preset') }}.json`
+- **Windows**: `%USERPROFILE%\.lmstudio\config-presets\{{ chat_config.get('preset_name', 'Preset') }}.json`
+
+```json
+{
+  "name": "{{ chat_config.get('preset_name', 'Preset') }}",
+  "inference_params": {
+    "pre_prompt": "You are a helpful, respectful, and honest assistant.",
+    "input_prefix": "{{ chat_config.get('user_prefix', '<|im_start|>user\\n') }}",
+    "input_suffix": "{{ chat_config.get('user_suffix', '<|im_end|>\\n') }}",
+    "pre_prompt_prefix": "{{ chat_config.get('system_prefix', '<|im_start|>system\\n') }}",
+    "pre_prompt_suffix": "{{ chat_config.get('system_suffix', '<|im_end|>\\n') }}",
+    "antiprompt": [
+{% for st in chat_config.get('stop_tokens', ['<|im_start|>', '<|im_end|>', '<|endoftext|>']) %}
+      "{{ st }}"{{ "," if not loop.last else "" }}
+{% endfor %}
+    ],
+    "stopStrings": [
+{% for st in chat_config.get('stop_tokens', ['<|im_start|>', '<|im_end|>', '<|endoftext|>']) %}
+      "{{ st }}"{{ "," if not loop.last else "" }}
+{% endfor %}
+    ],
+    "temperature": 0.7,
+    "max_tokens": 2048
+  }
+}
+```
+
+Restart LM Studio, load **{{ hf_repo }}**, and select **"{{ chat_config.get('preset_name', 'Preset') }}"** from the Prompt Template dropdown.
+
+### Option B: Manual LM Studio Configuration
+
+1. Load **{{ hf_repo }}** in LM Studio.
+2. In the right-hand **Advanced Configuration / Inference Parameters** panel:
+   - **Stop Strings (antiprompt / stopStrings)**: Add {% for st in chat_config.get('stop_tokens', ['<|im_start|>', '<|im_end|>', '<|endoftext|>']) %}`{{ st }}`{% if not loop.last %}, {% endif %}{% endfor %}
+
+   - **System Prefix**: `{{ chat_config.get('system_prefix', '<|im_start|>system\\n') }}`
+   - **System Suffix**: `{{ chat_config.get('system_suffix', '<|im_end|>\\n') }}`
+   - **User Prefix**: `{{ chat_config.get('user_prefix', '<|im_start|>user\\n') }}`
+   - **Assistant Suffix**: `{{ chat_config.get('assistant_suffix', '<|im_end|>\\n<|im_start|>assistant\\n') }}`
+
+### Option C: Ollama Modelfile Setup
+
+Create a `Modelfile` to run this model in Ollama:
+
+```dockerfile
+FROM {{ hf_repo }}
+
+{% for st in chat_config.get('stop_tokens', ['<|im_start|>', '<|im_end|>', '<|endoftext|>']) %}
+PARAMETER stop "{{ st }}"
+{% endfor %}
+PARAMETER temperature 0.7
+
+{% raw %}TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+"""
+{% endraw %}```
+
+Create and run with Ollama:
+```bash
+ollama create {{ chat_config.get('ollama_name', 'model') }} -f Modelfile
+ollama run {{ chat_config.get('ollama_name', 'model') }}
+```
 
 ---
 
@@ -133,10 +295,9 @@ pip install mlx-lm=={{ conversion_meta.get('mlx_lm_version', 'latest') }}
 
 ## Limitations & Known Issues
 
-- Performance may degrade with very long contexts (>8K tokens) at lower quantization levels.
-- This is a weight-only conversion; the model architecture and behavior are inherited from the source model.
-- Quantization introduces a small quality loss compared to the original model. Lower bit counts = more loss.
-- This model requires Apple Silicon (M1 or later) to run with MLX.
+- 4-bit group-wise quantization introduces minor precision loss compared to unquantized weights; for deep mathematical derivations or precision-critical reasoning, test the 8-bit or 16-bit variants.
+- High context sequences (>32K tokens) require sufficient unified memory headroom; ensure unified memory is not overcommitted.
+- This is a weight-only MLX conversion designed specifically for Apple Silicon GPUs (M1/M2/M3/M4 series).
 
 ---
 

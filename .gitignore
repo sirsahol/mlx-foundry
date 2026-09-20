@@ -36,3 +36,7 @@ htmlcov/
 output/
 *.log
 .DS_Store
+batch_progress.json
+.workflow_state/
+AGENTS.md
+agents.md

@@ -55,7 +55,7 @@ def publish_model(
         }
 
     # Build tags
-    tags = ["mlx", "safetensors"]
+    tags = ["mlx", "safetensors", "apple-silicon"]
 
     if quant_bits < 16:
         tags.append(f"{quant_bits}-bit")

@@ -37,3 +37,22 @@ def test_pipeline_dry_run(mock_convert, tmp_path):
     assert res["model_id"] == "test-org/dummy"
     assert len(res["conversions"]) == 1
     assert len(res["published"]) == 0
+
+
+def test_format_repo_name():
+    """Verify repo formatting handles chat suffixes and diffusion architectures."""
+    from mlx_foundry.pipeline import format_repo_name
+
+    assert (
+        format_repo_name("SirSahOl", "Qwen/Qwen2.5-7B-Instruct", 16)
+        == "SirSahOl/Qwen2.5-7B-Instruct-chat-mlx-16bit"
+    )
+    assert (
+        format_repo_name("SirSahOl", "THUDM/glm-edge-4b-chat", 8)
+        == "SirSahOl/glm-edge-4b-chat-mlx-8bit"
+    )
+    assert (
+        format_repo_name("SirSahOl", "Qwen/Qwen-Image-2.1", 4, backend="mflux")
+        == "SirSahOl/Qwen-Image-2.1-mlx-4bit"
+    )
+

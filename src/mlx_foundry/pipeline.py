@@ -16,6 +16,28 @@ from mlx_foundry.social import generate_social_posts
 console = Console()
 
 
+def format_repo_name(
+    author: str,
+    model_id: str,
+    quant_bits: int,
+    backend: str = "auto",
+) -> str:
+    """Format Hugging Face repository ID consistently.
+
+    Avoids duplicate '-chat-chat' suffixes and handles diffusion model naming.
+    """
+    model_name = model_id.split("/")[-1]
+    quant_label = f"{quant_bits}bit"
+    if model_name.endswith("-chat"):
+        return f"{author}/{model_name}-mlx-{quant_label}"
+    elif backend == "mflux" or any(
+        h in model_name.lower() for h in ["image", "flux", "diffusion", "dit"]
+    ):
+        return f"{author}/{model_name}-mlx-{quant_label}"
+    else:
+        return f"{author}/{model_name}-chat-mlx-{quant_label}"
+
+
 def run_pipeline(
     model_id: str,
     author: str = "SirSahOl",
@@ -27,31 +49,11 @@ def run_pipeline(
     cleanup: bool = True,
     private: bool = False,
     force: bool = False,
+    collection_slug: str | None = None,
+    backend: str = "auto",
+    **kwargs: Any,
 ) -> dict[str, Any]:
-    """Run the full MLX Foundry pipeline.
-
-    Steps:
-    1. Convert model to all requested quantization levels
-    2. Benchmark each converted model
-    3. Generate model cards with benchmark data
-    4. Publish each model to HuggingFace Hub
-    5. Generate social media posts
-
-    Args:
-        model_id: HuggingFace model ID (e.g., 'Qwen/Qwen3-0.6B').
-        author: HuggingFace username for repo naming.
-        quants: List of quantization levels.
-        output_dir: Base output directory.
-        skip_benchmark: Skip benchmarking step.
-        skip_publish: Skip publishing step (useful for testing).
-        skip_social: Skip social post generation.
-        cleanup: Delete local files after successful upload.
-        private: Make HF repos private.
-        force: Overwrite existing outputs.
-
-    Returns:
-        dict: Summary of pipeline results.
-    """
+    """Run the full MLX Foundry pipeline."""
     model_name = model_id.split("/")[-1]
 
     console.print(
@@ -59,6 +61,7 @@ def run_pipeline(
             f"[bold]MLX Foundry Pipeline[/bold]\n\n"
             f"Model: {model_id}\n"
             f"Quantizations: {quants}\n"
+            f"Backend: {backend}\n"
             f"Author: {author}",
             title="🔥 Starting Pipeline",
             border_style="blue",
@@ -80,6 +83,7 @@ def run_pipeline(
         quants=quants,
         output_dir=output_dir,
         force=force,
+        backend=backend,
     )
     results["conversions"] = [r.__dict__ for r in conversion_results]
 
@@ -104,8 +108,7 @@ def run_pipeline(
     # Build cross-reference list of all quant repos
     all_quant_repos = []
     for cr in conversion_results:
-        quant_label = f"{cr.quant_bits}bit"
-        repo_name = f"{author}/{model_name}-chat-mlx-{quant_label}"
+        repo_name = format_repo_name(author, model_id, cr.quant_bits, backend)
         all_quant_repos.append(
             {
                 "repo": repo_name,
@@ -117,8 +120,7 @@ def run_pipeline(
     # Step 3: Generate Model Cards
     console.print("\n[bold]═══ Step 3/5: Generating Model Cards ═══[/bold]")
     for cr in conversion_results:
-        quant_label = f"{cr.quant_bits}bit"
-        hf_repo = f"{author}/{model_name}-chat-mlx-{quant_label}"
+        hf_repo = format_repo_name(author, model_id, cr.quant_bits, backend)
         try:
             generate_model_card(
                 model_path=cr.output_path,
@@ -129,14 +131,13 @@ def run_pipeline(
                 all_quant_repos=all_quant_repos,
             )
         except Exception as e:  # noqa: BLE001
-            console.print(f"[yellow]⚠ Card generation failed for {quant_label}: {e}[/yellow]")
+            console.print(f"[yellow]⚠ Card generation failed for {cr.quant_bits}bit: {e}[/yellow]")
 
     # Step 4: Publish
     if not skip_publish:
         console.print("\n[bold]═══ Step 4/5: Publishing ═══[/bold]")
         for cr in conversion_results:
-            quant_label = f"{cr.quant_bits}bit"
-            hf_repo = f"{author}/{model_name}-chat-mlx-{quant_label}"
+            hf_repo = format_repo_name(author, model_id, cr.quant_bits, backend)
             try:
                 url = publish_model(
                     model_path=cr.output_path,
@@ -148,7 +149,25 @@ def run_pipeline(
                 )
                 results["published"].append({"repo": hf_repo, "url": url})
             except Exception as e:  # noqa: BLE001
-                console.print(f"[yellow]⚠ Publish failed for {quant_label}: {e}[/yellow]")
+                console.print(f"[yellow]⚠ Publish failed for {cr.quant_bits}bit: {e}[/yellow]")
+
+        if collection_slug and results["published"]:
+            try:
+                from huggingface_hub import HfApi
+
+                hf_api = HfApi()
+                for pub in results["published"]:
+                    try:
+                        hf_api.add_collection_item(
+                            collection_slug=collection_slug,
+                            item_id=pub["repo"],
+                            item_type="model",
+                            exists_ok=True,
+                        )
+                    except Exception:  # noqa: BLE001, S110
+                        pass
+            except Exception as e:  # noqa: BLE001
+                console.print(f"[yellow]⚠ Collection update notice: {e}[/yellow]")
     else:
         console.print("\n[bold]═══ Step 4/5: Publishing (SKIPPED) ═══[/bold]")
 

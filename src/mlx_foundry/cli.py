@@ -64,12 +64,17 @@ def convert(
     force: Annotated[
         bool, typer.Option("--force", "-f", help="Overwrite existing outputs.")
     ] = False,
+    backend: Annotated[
+        str, typer.Option("--backend", "-b", help="Backend engine: auto, mlx_lm, mflux.")
+    ] = "auto",
 ):
     """Convert a HuggingFace model to MLX format at multiple quantization levels."""
     from mlx_foundry.convert import convert_model
 
     quant_list = parse_quants(quants)
-    results = convert_model(model_id=model, quants=quant_list, output_dir=output_dir, force=force)
+    results = convert_model(
+        model_id=model, quants=quant_list, output_dir=output_dir, force=force, backend=backend
+    )
 
     if results:
         console.print(f"\n[green]✓ Converted {len(results)} model(s) successfully.[/green]")
@@ -196,6 +201,9 @@ def pipeline(
     force: Annotated[
         bool, typer.Option("--force", "-f", help="Overwrite existing outputs.")
     ] = False,
+    backend: Annotated[
+        str, typer.Option("--backend", "-b", help="Backend engine: auto, mlx_lm, mflux.")
+    ] = "auto",
 ):
     """Run the full pipeline: convert → benchmark → card → publish → social."""
     from mlx_foundry.pipeline import run_pipeline
@@ -212,4 +220,9 @@ def pipeline(
         cleanup=not no_cleanup,
         private=private,
         force=force,
+        backend=backend,
     )
+
+
+if __name__ == "__main__":
+    app()
