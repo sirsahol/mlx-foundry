@@ -124,6 +124,11 @@ def check_architecture_support(model_id: str) -> tuple[bool, str]:
             "qwen3_moe",
             "qwen3_5",
             "qwen3_5_text",
+            "gemma3",
+            "gemma3_text",
+            "gemma4",
+            "gemma4_text",
+            "opt",
         }
         model_type_clean = model_type.lower().strip()
         arch_clean = arch.lower().strip()
@@ -290,7 +295,8 @@ def convert_model(
         cmd = [
             sys.executable,
             "-m",
-            "mlx_lm.convert",
+            "mlx_lm",
+            "convert",
             "--hf-path",
             hf_path_arg,
             "--mlx-path",
