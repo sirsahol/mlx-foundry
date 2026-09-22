@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Convert, benchmark, and publish openbmb/MiniCPM5-2B to Hugging Face Hub."""
 
+import os
+os.environ["HF_HUB_DISABLE_XET"] = "1"
 from pathlib import Path
 import sys
 
