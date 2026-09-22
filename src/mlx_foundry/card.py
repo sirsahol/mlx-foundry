@@ -162,6 +162,9 @@ def generate_model_card(
         "benchmark_results": [
             r.__dict__ if hasattr(r, "__dict__") else r for r in benchmark_results
         ],
+        "benchmark_table_md": _format_benchmark_table(
+            [r.__dict__ if hasattr(r, "__dict__") else r for r in benchmark_results]
+        ),
         "model_size": format_size(conversion_meta.get("output_size_bytes", 0)),
         "all_quant_repos": all_quant_repos or [],
         "mlx_lm_version": conversion_meta.get("mlx_lm_version", "unknown"),
@@ -184,6 +187,7 @@ def generate_model_card(
 
     # Write to model directory
     readme_path = model_path / "README.md"
+    readme_path.parent.mkdir(parents=True, exist_ok=True)
     with open(readme_path, "w") as f:
         f.write(rendered)
 
@@ -200,6 +204,36 @@ def _detect_quant_from_path(path: Path) -> int:
     return 16
 
 
+def _format_benchmark_table(benchmark_results: list[dict[str, Any]]) -> str:
+    """Format benchmark results into a clean markdown table with proper row newlines."""
+    if not benchmark_results:
+        return ""
+    seen: dict[int, dict[str, Any]] = {}
+    for br in benchmark_results:
+        q = br.get("quant_bits")
+        if q is not None:
+            seen[int(q)] = br
+    sorted_results = [seen[q] for q in sorted(seen.keys())] if seen else benchmark_results
+
+    headers = ["Metric"] + [f"{br.get('quant_bits', '?')}-bit" for br in sorted_results]
+    seps = [":---"] + [":---" for _ in sorted_results]
+    tps = ["**Tokens/sec**"] + [f"**{br.get('tokens_per_second', 'N/A')}**" for br in sorted_results]
+    ttft = ["**TTFT**"] + [f"{br.get('time_to_first_token_ms', 'N/A')} ms" for br in sorted_results]
+    mem = ["**Peak Memory**"] + [f"{br.get('peak_memory_mb', 'N/A')} MB" for br in sorted_results]
+
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(seps) + " |",
+        "| " + " | ".join(tps) + " |",
+        "| " + " | ".join(ttft) + " |",
+        "| " + " | ".join(mem) + " |",
+    ]
+    if any(br.get("perplexity") for br in sorted_results):
+        ppl = ["**Perplexity**"] + [f"{br.get('perplexity', 'N/A')}" for br in sorted_results]
+        lines.append("| " + " | ".join(ppl) + " |")
+    return "\n".join(lines)
+
+
 def _extract_param_info(
     model_path: Path,
     source_model: str,
@@ -210,36 +244,70 @@ def _extract_param_info(
     source_lower = source_model.lower()
     name_lower = model_path.name.lower()
 
-    if "qwen2.5-7b" in source_lower or "qwen2.5-7b" in name_lower:
-        return 7.0, "7.61B (7.07B non-embedding)"
-    if "qwen3-0.6b" in source_lower or "qwen3-0.6b" in name_lower:
-        return 0.6, "0.59B"
-    if "qwen2.5-1.5b" in source_lower or "qwen2.5-1.5b" in name_lower:
-        return 1.5, "1.54B"
-    if "qwen2.5-3b" in source_lower or "qwen2.5-3b" in name_lower:
-        return 3.0, "3.09B"
-    if "glm-edge-4b" in source_lower or "glm-edge-4b" in name_lower:
-        return 4.0, "4.15B"
-    if "glm-edge-1.5b" in source_lower or "glm-edge-1.5b" in name_lower:
-        return 1.5, "1.54B"
-    if "k2-horizon-0.9b" in source_lower or "k2-horizon-0.9b" in name_lower:
-        return 0.9, "0.9B"
-    if "neohorse-1-9b" in source_lower or "neohorse-1-9b" in name_lower:
-        return 9.0, "9.0B"
+    # Normalize underscores for version numbers like 1_6b -> 1.6b
+    s_norm = source_lower.replace("_", ".")
+    n_norm = name_lower.replace("_", ".")
 
-    # Regex search for parameter pattern without matching quant suffixes like 4bit
-    pattern = re.compile(r"(?<![a-zA-Z0-9.])(\d+(?:\.\d+)?)\s*[bB](?:illion)?(?![a-zA-Z])")
-    match = pattern.search(source_model) or pattern.search(model_path.name)
-    if match:
-        val = float(match.group(1))
-        return val, f"{val:g}B"
+    # Known model families with exact counts
+    if "smollm2-135m" in s_norm or "smollm2-135m" in n_norm:
+        return 0.135, "135M"
+    if "smollm3-3b" in s_norm or "smollm3-3b" in n_norm:
+        return 3.0, "3.0B"
+    if "qwen2.5-7b" in s_norm or "qwen2.5-7b" in n_norm:
+        return 7.0, "7.61B (7.07B non-embedding)"
+    if "qwen3-0.6b" in s_norm or "qwen3-0.6b" in n_norm:
+        return 0.6, "0.59B"
+    if "qwen3-1.7b" in s_norm or "qwen3-1.7b" in n_norm:
+        return 1.7, "1.7B"
+    if "qwen2.5-1.5b" in s_norm or "qwen2.5-1.5b" in n_norm:
+        return 1.5, "1.54B"
+    if "qwen2.5-3b" in s_norm or "qwen2.5-3b" in n_norm:
+        return 3.0, "3.09B"
+    if "glm-edge-4b" in s_norm or "glm-edge-4b" in n_norm:
+        return 4.0, "4.15B"
+    if "glm-edge-1.5b" in s_norm or "glm-edge-1.5b" in n_norm:
+        return 1.5, "1.54B"
+    if "k2-horizon-0.9b" in s_norm or "k2-horizon-0.9b" in n_norm:
+        return 0.9, "0.9B"
+    if "neohorse-1-9b" in s_norm or "neohorse-1-9b" in n_norm:
+        return 9.0, "9.0B"
+    if "granite-4.1-3b" in s_norm or "granite-4.1-3b" in n_norm:
+        return 3.0, "3.0B"
+    if "decider-2b" in s_norm or "decider-2b" in n_norm:
+        return 2.0, "2.0B"
+    if "eai-distill-0.5b" in s_norm or "eai-distill-0.5b" in n_norm:
+        return 0.5, "0.5B"
+    if "llama-guard-3-1b" in s_norm or "llama-guard-3-1b" in n_norm:
+        return 1.0, "1.0B"
+    if "olmo-2-0425-1b" in s_norm or "olmo-2-0425-1b" in n_norm:
+        return 1.0, "1.0B"
+    if "stablelm-2-1.6b" in s_norm or "stablelm-2-1.6b" in n_norm:
+        return 1.6, "1.6B"
+
+    # Regex search for million (M)
+    pattern_m = re.compile(r"(?<![a-zA-Z0-9.])(\d+(?:\.\d+)?)\s*[mM](?:illion)?(?![a-zA-Z])")
+    match_m = pattern_m.search(s_norm) or pattern_m.search(n_norm)
+    if match_m:
+        val_m = float(match_m.group(1))
+        return val_m / 1000.0, f"{val_m:g}M"
+
+    # Regex search for billion (B)
+    pattern_b = re.compile(r"(?<![a-zA-Z0-9.])(\d+(?:\.\d+)?)\s*[bB](?:illion)?(?![a-zA-Z])")
+    match_b = pattern_b.search(s_norm) or pattern_b.search(n_norm)
+    if match_b:
+        val_b = float(match_b.group(1))
+        return val_b, f"{val_b:g}B"
 
     # Fallback from output size
     output_size = conversion_meta.get("output_size_bytes", 0)
     if output_size > 0:
         quant_bits = conversion_meta.get("quant_bits", 4)
         bytes_per_param = (quant_bits / 8.0) * 1.15
-        est_params_b = round(output_size / (bytes_per_param * (1024**3)), 1)
+        est_params = output_size / bytes_per_param
+        if est_params < 0.8e9:
+            est_m = round(est_params / (1000**2))
+            return est_m / 1000.0, f"~{est_m}M"
+        est_params_b = round(est_params / (1000**3), 1)
         if est_params_b > 0.1:
             return est_params_b, f"~{est_params_b:g}B"
 
@@ -307,6 +375,12 @@ def _get_model_details(
             16: "24 GB – 32 GB Unified Memory",
         }
         min_ram = min_ram_map.get(quant_bits, "16 GB Unified Memory")
+    elif params_b < 1.0:
+        # Sub-billion models (e.g. 135M, 500M)
+        weight_mb = round(params_b * 1000.0 * (quant_bits / 8.0) * 1.15)
+        active_mb = weight_mb + (50 if quant_bits == 4 else (70 if quant_bits == 8 else 100))
+        vram_footprint = f"{active_mb} MB"
+        min_ram = "8 GB Unified Memory"
     else:
         weight_gb = round(params_b * (quant_bits / 8.0) * 1.12 + 0.35, 1)
         vram_footprint = f"{weight_gb} GB"
@@ -437,26 +511,76 @@ def _get_hardware_sizing_matrix(params_b: float, quant_bits: int) -> list[dict[s
             },
         ]
 
-    # Dynamic scaling for other parameter sizes
-    weight_gb = max(0.4, params_b * (quant_bits / 8.0) * 1.12)
-    vram_str = f"~{round(weight_gb + 0.4, 1)} GB"
+    if params_b < 1.0:
+        # Sub-billion models (135M - 800M)
+        weight_mb = round(params_b * 1000.0 * (quant_bits / 8.0) * 1.15 + 50)
+        vram_str = f"~{weight_mb} MB"
+        scale = (0.135 / max(0.05, params_b)) ** 0.4 * (4.0 / quant_bits) ** 0.4
+        base_spd = max(160, round(250 * scale))
+        pro_spd = round(base_spd * 1.5)
+        max_spd = round(base_spd * 2.1)
+        ultra_spd = round(base_spd * 2.8)
+
+        base_ttft = max(3, round(4 * (params_b / 0.135) * (quant_bits / 4.0) ** 0.5))
+        pro_ttft = max(2, round(base_ttft * 0.7))
+        max_ttft = max(1, round(base_ttft * 0.5))
+        ultra_ttft = 1
+
+        return [
+            {
+                "tier": "M1 / M2 / M3 / M4 (Base)",
+                "ram": "8 GB Unified Memory",
+                "vram": vram_str,
+                "speed": f"~{base_spd} tokens/sec",
+                "ttft": f"~{base_ttft} ms",
+                "use_case": "Ultra-fast low-latency local edge inference & embedded assistants",
+            },
+            {
+                "tier": "M1 / M2 / M3 / M4 Pro",
+                "ram": "18 GB – 36 GB",
+                "vram": vram_str,
+                "speed": f"~{pro_spd} tokens/sec",
+                "ttft": f"~{pro_ttft} ms",
+                "use_case": "High-throughput concurrent processing, real-time agent loops",
+            },
+            {
+                "tier": "M1 / M2 / M3 / M4 Max",
+                "ram": "36 GB – 128 GB",
+                "vram": vram_str,
+                "speed": f"~{max_spd} tokens/sec",
+                "ttft": f"~{max_ttft} ms",
+                "use_case": "Maximum single-stream decoding velocity, swarm agents",
+            },
+            {
+                "tier": "M1 / M2 / M3 Ultra",
+                "ram": "64 GB – 192 GB",
+                "vram": vram_str,
+                "speed": f"~{ultra_spd} tokens/sec",
+                "ttft": f"~{ultra_ttft} ms",
+                "use_case": "Massive parallel batch evaluation, enterprise high-throughput serving",
+            },
+        ]
+
+    # Dynamic scaling for 1B - 5B models
+    weight_gb = max(0.4, round(params_b * (quant_bits / 8.0) * 1.12 + 0.35, 1))
+    vram_str = f"~{weight_gb} GB"
     base_spd = max(12, round(35 * (7.0 / params_b) ** 0.85 * (4.0 / quant_bits) ** 0.6))
     pro_spd = max(18, round(base_spd * 1.5))
     max_spd = max(26, round(base_spd * 2.15))
     ultra_spd = max(38, round(base_spd * 3.0))
 
-    base_ttft = max(25, round(110 * (params_b / 7.0) * (quant_bits / 4.0) ** 0.5))
-    pro_ttft = max(18, round(base_ttft * 0.68))
-    max_ttft = max(12, round(base_ttft * 0.42))
-    ultra_ttft = max(8, round(base_ttft * 0.28))
+    base_ttft = max(10, round(110 * (params_b / 7.0) * (quant_bits / 4.0) ** 0.5))
+    pro_ttft = max(7, round(base_ttft * 0.68))
+    max_ttft = max(5, round(base_ttft * 0.42))
+    ultra_ttft = max(3, round(base_ttft * 0.28))
 
-    min_ram_base = "8 GB" if weight_gb < 5.0 else ("16 GB" if weight_gb < 11.0 else "24 GB+")
+    min_ram_base = "8 GB Unified Memory" if weight_gb < 5.0 else ("16 GB Unified Memory" if weight_gb < 11.0 else "24 GB+")
     min_ram_pro = "18 GB – 36 GB" if weight_gb < 14.0 else "36 GB – 48 GB"
 
     return [
         {
             "tier": "M1 / M2 / M3 / M4 (Base)",
-            "ram": f"{min_ram_base} Unified Memory",
+            "ram": min_ram_base,
             "vram": vram_str,
             "speed": f"~{base_spd} tokens/sec",
             "ttft": f"~{base_ttft} ms",
@@ -532,6 +656,27 @@ def _get_quant_comparison(
                 "vram": "~15.2 GB",
                 "hw": "M2 / M3 / M4 Max/Ultra (32GB+ Unified Memory)",
                 "adv": "Full unquantized bfloat16 precision; zero perplexity loss, ideal for evaluation and reference output.",
+            },
+        }
+    elif params_b < 1.0:
+        sizes = {
+            4: {
+                "disk": f"~{round(params_b * 550 + 10)} MB",
+                "vram": f"~{round(params_b * 550 + 50)} MB",
+                "hw": "M1 / M2 / M3 / M4 (8GB+ Unified Memory)",
+                "adv": "Ultra-compact footprint, maximum generation speed; negligible memory pressure.",
+            },
+            8: {
+                "disk": f"~{round(params_b * 1050 + 15)} MB",
+                "vram": f"~{round(params_b * 1050 + 60)} MB",
+                "hw": "M1 / M2 / M3 / M4 (8GB+ Unified Memory)",
+                "adv": "Near-lossless precision with an extremely lightweight footprint.",
+            },
+            16: {
+                "disk": f"~{round(params_b * 2000 + 20)} MB",
+                "vram": f"~{round(params_b * 2000 + 90)} MB",
+                "hw": "M1 / M2 / M3 / M4 (8GB+ Unified Memory)",
+                "adv": "Full unquantized precision; zero perplexity penalty for reference evaluation.",
             },
         }
     else:

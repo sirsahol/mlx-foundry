@@ -115,3 +115,101 @@ def test_generate_model_card_qwen_7b(mock_fetch_info, tmp_path: Path):
     assert "4-bit MLX" in card_text
     assert "8-bit MLX" in card_text
     assert "16-bit MLX" in card_text
+
+
+@patch("mlx_foundry.card.fetch_model_info")
+def test_generate_model_card_measured_benchmarks_no_matrix_contradiction(mock_fetch_info, tmp_path: Path):
+    """Test that measured benchmarks render cleanly and do NOT render contradictory sizing matrix."""
+    mock_fetch_info.return_value = {
+        "model_id": "HuggingFaceTB/SmolLM2-135M",
+        "author": "HuggingFaceTB",
+        "license": "apache-2.0",
+        "pipeline_tag": "text-generation",
+        "tags": ["safetensors", "conversational"],
+        "base_model": "HuggingFaceTB/SmolLM2-135M",
+    }
+    model_dir = tmp_path / "SmolLM2-135M-mlx-4bit"
+    model_dir.mkdir()
+
+    benchmarks = [
+        {
+            "model_path": "output/SmolLM2-135M-mlx-4bit",
+            "chip": "Apple M1",
+            "memory_gb": 8,
+            "quant_bits": 4,
+            "tokens_per_second": 251.62,
+            "time_to_first_token_ms": 3.98,
+            "peak_memory_mb": 150.3,
+            "perplexity": None,
+            "num_runs": 5,
+            "max_tokens": 256,
+        },
+        {
+            "model_path": "output/SmolLM2-135M-mlx-8bit",
+            "chip": "Apple M1",
+            "memory_gb": 8,
+            "quant_bits": 8,
+            "tokens_per_second": 200.75,
+            "time_to_first_token_ms": 4.99,
+            "peak_memory_mb": 84.3,
+            "perplexity": None,
+            "num_runs": 5,
+            "max_tokens": 256,
+        },
+    ]
+
+    card_text = generate_model_card(
+        model_path=model_dir,
+        source_model="HuggingFaceTB/SmolLM2-135M",
+        hf_repo="SirSahOl/SmolLM2-135M-chat-mlx-4bit",
+        author="SirSahOl",
+        benchmark_results=benchmarks,
+    )
+
+    # Measured benchmarks MUST be present
+    assert "### Measured Benchmarks (Apple M1)" in card_text
+    assert "**251.62**" in card_text
+    assert "**200.75**" in card_text
+    assert "3.98 ms" in card_text
+    assert "150.3 MB" in card_text
+
+    # The contradictory theoretical matrix MUST NOT be present
+    assert "Apple Silicon Hardware Sizing Matrix" not in card_text
+    assert "~35 tokens/sec" not in card_text
+
+    # Parameters should be accurately identified as 135M
+    assert "135M" in card_text
+    assert "7B" not in card_text
+    # VRAM footprint should be in MB, not 4.2 GB
+    assert "4.2 GB" not in card_text
+    assert "MB" in card_text
+
+
+@patch("mlx_foundry.card.fetch_model_info")
+def test_generate_model_card_sub_billion_sizing(mock_fetch_info, tmp_path: Path):
+    """Test parameter extraction and sizing for sub-1B and non-7B models."""
+    mock_fetch_info.return_value = {
+        "model_id": "stabilityai/stablelm-2-1_6b",
+        "author": "stabilityai",
+        "license": "other",
+        "pipeline_tag": "text-generation",
+        "tags": ["safetensors"],
+        "base_model": "stabilityai/stablelm-2-1_6b",
+    }
+    model_dir = tmp_path / "stablelm-2-1_6b-mlx-4bit"
+    model_dir.mkdir()
+
+    card_text = generate_model_card(
+        model_path=model_dir,
+        source_model="stabilityai/stablelm-2-1_6b",
+        hf_repo="SirSahOl/stablelm-2-1_6b-chat-mlx-4bit",
+        author="SirSahOl",
+        benchmark_results=[],
+    )
+
+    # Must extract 1.6B, NOT 6B!
+    assert "1.6B" in card_text
+    assert "**Parameters**: 6B" not in card_text
+    # Sizing matrix should scale beyond 7B speeds
+    assert "~35 tokens/sec" not in card_text
+    assert "Apple Silicon Hardware Sizing Matrix" in card_text
