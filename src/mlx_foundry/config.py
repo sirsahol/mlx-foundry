@@ -18,6 +18,11 @@ BENCHMARK_EVAL_RUNS: int = 5
 # Supported quantization bits
 VALID_QUANTS: set[int] = {2, 3, 4, 6, 8, 16}
 
+# Canonical Hugging Face collection slug for Apple Silicon MLX models
+DEFAULT_COLLECTION_SLUG: str = (
+    "SirSahOl/mlx-models-by-sirsahol-optimized-for-apple-silicon-6aa2b239913bcab23b1ed59a"
+)
+
 
 @dataclass
 class ConversionResult:

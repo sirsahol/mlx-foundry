@@ -246,8 +246,20 @@ def convert_model(
     try:
         from huggingface_hub import snapshot_download
 
-        console.print(f"  Ensuring complete repository snapshot for {model_id}...")
-        snapshot_result = snapshot_download(model_id)
+        snapshot_result = snapshot_download(
+            model_id,
+            ignore_patterns=[
+                "*.onnx",
+                "*.onnx_data",
+                "*.bin",
+                "*.pt",
+                "onnx/*",
+                "*.msgpack",
+                "*.h5",
+                "*.tflite",
+                "*.ot",
+            ],
+        )
         if snapshot_result:
             snapshot_path = Path(snapshot_result)
             if snapshot_path.is_dir():

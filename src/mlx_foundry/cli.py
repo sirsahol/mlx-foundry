@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 
 from mlx_foundry import __version__
-from mlx_foundry.config import DEFAULT_OUTPUT_DIR
+from mlx_foundry.config import DEFAULT_COLLECTION_SLUG, DEFAULT_OUTPUT_DIR
 
 app = typer.Typer(
     name="mlx-foundry",
@@ -204,6 +204,9 @@ def pipeline(
     backend: Annotated[
         str, typer.Option("--backend", "-b", help="Backend engine: auto, mlx_lm, mflux.")
     ] = "auto",
+    collection: Annotated[
+        str | None, typer.Option("--collection", "-c", help="Hugging Face collection slug.")
+    ] = DEFAULT_COLLECTION_SLUG,
 ):
     """Run the full pipeline: convert → benchmark → card → publish → social."""
     from mlx_foundry.pipeline import run_pipeline
@@ -220,6 +223,7 @@ def pipeline(
         cleanup=not no_cleanup,
         private=private,
         force=force,
+        collection_slug=collection,
         backend=backend,
     )
 
