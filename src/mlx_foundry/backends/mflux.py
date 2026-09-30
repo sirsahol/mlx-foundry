@@ -65,7 +65,11 @@ class MfluxBackend(BaseBackend):
             tags = set(info.tags or [])
             if "diffusers" in tags or "text-to-image" in tags or "image-editing" in tags:
                 return True
-            if getattr(info, "pipeline_tag", None) in {"text-to-image", "image-to-image", "image-editing"}:
+            if getattr(info, "pipeline_tag", None) in {
+                "text-to-image",
+                "image-to-image",
+                "image-editing",
+            }:
                 return True
         except Exception:  # noqa: BLE001, S110
             pass
@@ -100,7 +104,9 @@ class MfluxBackend(BaseBackend):
                     continue
                 shutil.rmtree(output_path)
 
-            console.print(f"\n[bold magenta]Converting diffusion model {model_id} to {quant_label}...[/bold magenta]")
+            console.print(
+                f"\n[bold magenta]Converting diffusion model {model_id} to {quant_label}...[/bold magenta]"
+            )
             start_time = time.time()
             output_path.mkdir(parents=True, exist_ok=True)
 
@@ -145,16 +151,16 @@ class MfluxBackend(BaseBackend):
         try:
             mflux_bin = shutil.which("mflux-save")
             cmd = (
-                [mflux_bin]
-                if mflux_bin
-                else [sys.executable, "-m", "mflux.models.common.cli.save"]
+                [mflux_bin] if mflux_bin else [sys.executable, "-m", "mflux.models.common.cli.save"]
             )
-            cmd.extend([
-                "--path",
-                str(output_path),
-                "--model",
-                model_id,
-            ])
+            cmd.extend(
+                [
+                    "--path",
+                    str(output_path),
+                    "--model",
+                    model_id,
+                ]
+            )
             if "qwen-image" in model_id.lower() or "qwen_image" in model_id.lower():
                 cmd.extend(["--base-model", "qwen-image"])
             if quant < 16:

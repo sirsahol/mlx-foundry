@@ -55,4 +55,3 @@ def test_format_repo_name():
         format_repo_name("SirSahOl", "Qwen/Qwen-Image-2.1", 4, backend="mflux")
         == "SirSahOl/Qwen-Image-2.1-mlx-4bit"
     )
-

@@ -2,10 +2,10 @@
 # OPT architecture implementation for Apple Silicon MLX
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import mlx.core as mx
-import mlx.nn as nn
+from mlx import nn
 from mlx_lm.models.base import BaseModelArgs, create_attention_mask, scaled_dot_product_attention
 
 
@@ -19,7 +19,7 @@ class ModelArgs(BaseModelArgs):
     ffn_dim: int = 3072
     max_position_embeddings: int = 2048
     do_layer_norm_before: bool = True
-    word_embed_proj_dim: Optional[int] = 768
+    word_embed_proj_dim: int | None = 768
 
 
 class Attention(nn.Module):
@@ -38,8 +38,8 @@ class Attention(nn.Module):
     def __call__(
         self,
         x: mx.array,
-        mask: Optional[mx.array] = None,
-        cache: Optional[Any] = None,
+        mask: mx.array | None = None,
+        cache: Any | None = None,
     ) -> mx.array:
         B, L, _ = x.shape
 
@@ -74,8 +74,8 @@ class TransformerBlock(nn.Module):
     def __call__(
         self,
         x: mx.array,
-        mask: Optional[mx.array] = None,
-        cache: Optional[Any] = None,
+        mask: mx.array | None = None,
+        cache: Any | None = None,
     ) -> mx.array:
         if self.do_layer_norm_before:
             residual = x

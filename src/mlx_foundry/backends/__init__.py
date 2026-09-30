@@ -51,4 +51,6 @@ def get_backend(model_id: str, backend_name: str | None = None) -> BaseBackend:
     elif resolved_name in {"mlx_lm", "mlx-lm", "llm"}:
         return MLXLMBackend()
     else:
-        raise ValueError(f"Unsupported backend: '{resolved_name}'. Valid backends are: 'auto', 'mlx_lm', 'mflux'.")
+        raise ValueError(
+            f"Unsupported backend: '{resolved_name}'. Valid backends are: 'auto', 'mlx_lm', 'mflux'."
+        )

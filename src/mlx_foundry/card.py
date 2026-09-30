@@ -217,7 +217,9 @@ def _format_benchmark_table(benchmark_results: list[dict[str, Any]]) -> str:
 
     headers = ["Metric"] + [f"{br.get('quant_bits', '?')}-bit" for br in sorted_results]
     seps = [":---"] + [":---" for _ in sorted_results]
-    tps = ["**Tokens/sec**"] + [f"**{br.get('tokens_per_second', 'N/A')}**" for br in sorted_results]
+    tps = ["**Tokens/sec**"] + [
+        f"**{br.get('tokens_per_second', 'N/A')}**" for br in sorted_results
+    ]
     ttft = ["**TTFT**"] + [f"{br.get('time_to_first_token_ms', 'N/A')} ms" for br in sorted_results]
     mem = ["**Peak Memory**"] + [f"{br.get('peak_memory_mb', 'N/A')} MB" for br in sorted_results]
 
@@ -574,7 +576,11 @@ def _get_hardware_sizing_matrix(params_b: float, quant_bits: int) -> list[dict[s
     max_ttft = max(5, round(base_ttft * 0.42))
     ultra_ttft = max(3, round(base_ttft * 0.28))
 
-    min_ram_base = "8 GB Unified Memory" if weight_gb < 5.0 else ("16 GB Unified Memory" if weight_gb < 11.0 else "24 GB+")
+    min_ram_base = (
+        "8 GB Unified Memory"
+        if weight_gb < 5.0
+        else ("16 GB Unified Memory" if weight_gb < 11.0 else "24 GB+")
+    )
     min_ram_pro = "18 GB – 36 GB" if weight_gb < 14.0 else "36 GB – 48 GB"
 
     return [

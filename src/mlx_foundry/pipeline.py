@@ -28,10 +28,10 @@ def format_repo_name(
     """
     model_name = model_id.split("/")[-1]
     quant_label = f"{quant_bits}bit"
-    if model_name.endswith("-chat"):
-        return f"{author}/{model_name}-mlx-{quant_label}"
-    elif backend == "mflux" or any(
-        h in model_name.lower() for h in ["image", "flux", "diffusion", "dit"]
+    if (
+        model_name.endswith("-chat")
+        or backend == "mflux"
+        or any(h in model_name.lower() for h in ["image", "flux", "diffusion", "dit"])
     ):
         return f"{author}/{model_name}-mlx-{quant_label}"
     else:

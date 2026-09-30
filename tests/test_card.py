@@ -118,7 +118,9 @@ def test_generate_model_card_qwen_7b(mock_fetch_info, tmp_path: Path):
 
 
 @patch("mlx_foundry.card.fetch_model_info")
-def test_generate_model_card_measured_benchmarks_no_matrix_contradiction(mock_fetch_info, tmp_path: Path):
+def test_generate_model_card_measured_benchmarks_no_matrix_contradiction(
+    mock_fetch_info, tmp_path: Path
+):
     """Test that measured benchmarks render cleanly and do NOT render contradictory sizing matrix."""
     mock_fetch_info.return_value = {
         "model_id": "HuggingFaceTB/SmolLM2-135M",
