@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,74 @@ from mlx_foundry.pipeline import run_pipeline
 from mlx_foundry.utils import get_disk_free_gb
 
 console = Console()
+
+_active_prefetches: dict[str, threading.Thread] = {}
+
+
+def start_prefetch(model_id: str, cache_dir: Path | str | None = None) -> threading.Thread | None:
+    """Start an asynchronous prefetch download of the model snapshot in the background.
+
+    Allows weights for upcoming models to stream over the network concurrently
+    while the active model is quantizing, benchmarking, and uploading.
+    """
+    if model_id in _active_prefetches and _active_prefetches[model_id].is_alive():
+        return _active_prefetches[model_id]
+
+    import subprocess
+
+    def _worker() -> None:
+        try:
+            # Check if another process is already downloading this model
+            try:
+                pg = subprocess.run(
+                    ["pgrep", "-f", model_id], capture_output=True, text=True, check=False
+                )
+                pids = [p for p in pg.stdout.strip().split() if p and p != str(os.getpid())]
+            except Exception:  # noqa: BLE001
+                pids = []
+
+            if pids:
+                console.print(
+                    f"[cyan]▸ [Prefetch] Detected active download process {pids[0]} for {model_id}, tracking...[/cyan]"
+                )
+                while True:
+                    time.sleep(2)
+                    check = subprocess.run(["kill", "-0", pids[0]], capture_output=True, check=False)
+                    if check.returncode != 0:
+                        break
+                console.print(
+                    f"[green]✓ [Prefetch] Process {pids[0]} for {model_id} finished[/green]"
+                )
+                return
+
+            from huggingface_hub import snapshot_download
+
+            console.print(
+                f"[cyan]▸ [Prefetch] Starting concurrent background download for {model_id}...[/cyan]"
+            )
+            snapshot_download(
+                model_id,
+                cache_dir=str(cache_dir) if cache_dir else None,
+                ignore_patterns=[
+                    "*.onnx",
+                    "*.bin",
+                    "*.pt",
+                    "*.msgpack",
+                    "*.h5",
+                    "*.tflite",
+                    "*.ot",
+                ],
+            )
+            console.print(f"[green]✓ [Prefetch] Background download finished for {model_id}[/green]")
+        except Exception as e:  # noqa: BLE001
+            console.print(
+                f"[yellow]⚠ [Prefetch] Notice: background download for {model_id}: {e}[/yellow]"
+            )
+
+    t = threading.Thread(target=_worker, name=f"prefetch-{model_id}", daemon=True)
+    _active_prefetches[model_id] = t
+    t.start()
+    return t
 
 TIER_1_MODELS = [
     "Qwen/Qwen3-0.6B",
@@ -144,6 +213,7 @@ def run_batch(
     skip_benchmark: bool = False,
     skip_publish: bool = False,
     cache_dir: Path | str | None = None,
+    prefetch: bool = True,
 ) -> dict[str, Any]:
     """Run batch conversion for a list of models with post-conversion cache cleanup."""
     progress = load_progress(progress_file)
@@ -155,6 +225,7 @@ def run_batch(
             f"Total Models: {len(models)} | Quants: {active_quants}\n"
             f"Dry Run: {dry_run} | Start Index: {start_from}\n"
             f"Skip Benchmark: {skip_benchmark} | Skip Publish: {skip_publish}\n"
+            f"Prefetch: {prefetch}\n"
             f"Author: [green]{AUTHOR}[/green]\n"
             f"Collection: [yellow]{COLLECTION_SLUG}[/yellow]",
             title="Batch Runner",
@@ -192,6 +263,32 @@ def run_batch(
         console.print(
             f"\n[bold yellow]Processing [{i + 1}/{len(models)}]: {model_id}[/bold yellow]"
         )
+
+        # Concurrently prefetch the next upcoming model in the queue
+        if prefetch and not dry_run:
+            for next_entry in models[i + 1 :]:
+                next_id = (
+                    next_entry if isinstance(next_entry, str) else next_entry.get("model", "")
+                )
+                next_quants = (
+                    next_entry.get("quants", active_quants)
+                    if isinstance(next_entry, dict)
+                    else active_quants
+                )
+                next_key = (
+                    f"{next_id}:{','.join(map(str, next_quants))}"
+                    if next_quants != active_quants
+                    else next_id
+                )
+                if next_key not in progress["completed"]:
+                    start_prefetch(next_id, cache_dir=cache_dir)
+                    break
+
+        if model_id in _active_prefetches and _active_prefetches[model_id].is_alive():
+            console.print(
+                f"[cyan]▸ Waiting for background prefetch of {model_id} to finish...[/cyan]"
+            )
+            _active_prefetches[model_id].join()
 
         if not dry_run:
             arch_ok, arch_name = check_architecture_support(model_id)
@@ -266,6 +363,11 @@ def main() -> None:
     parser.add_argument(
         "--skip-publish", action="store_true", help="Skip Hugging Face Hub publication"
     )
+    parser.add_argument(
+        "--no-prefetch",
+        action="store_true",
+        help="Disable concurrent background prefetching of upcoming model weights",
+    )
     args = parser.parse_args()
 
     if args.models:
@@ -280,6 +382,7 @@ def main() -> None:
         quants=args.quants,
         skip_benchmark=args.skip_benchmark,
         skip_publish=args.skip_publish,
+        prefetch=not args.no_prefetch,
     )
 
 

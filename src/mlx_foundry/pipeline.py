@@ -164,8 +164,9 @@ def run_pipeline(
                             item_type="model",
                             exists_ok=True,
                         )
-                    except Exception:  # noqa: BLE001, S110
-                        pass
+                        console.print(f"  [green]✓[/green] Added {pub['repo']} to collection")
+                    except Exception as item_err:  # noqa: BLE001
+                        console.print(f"  [yellow]⚠ Could not add {pub['repo']} to collection: {item_err}[/yellow]")
             except Exception as e:  # noqa: BLE001
                 console.print(f"[yellow]⚠ Collection update notice: {e}[/yellow]")
     else:

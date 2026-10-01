@@ -25,6 +25,7 @@ from mlx_foundry.batch_convert import (  # noqa: F401
     main,
     run_batch,
     save_progress,
+    start_prefetch,
 )
 
 if __name__ == "__main__":

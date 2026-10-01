@@ -129,6 +129,8 @@ def check_architecture_support(model_id: str) -> tuple[bool, str]:
             "gemma4",
             "gemma4_text",
             "opt",
+            "qwen3",
+            "spark2_5",
         }
         model_type_clean = model_type.lower().strip()
         arch_clean = arch.lower().strip()
@@ -197,6 +199,31 @@ def ensure_safetensors_symlinks(snapshot_path: Path) -> list[Path]:
                 )
             except OSError:
                 pass
+
+    # Also handle non-standard model.safetensors-*.safetensors naming
+    for weird_file in sorted(snapshot_path.glob("model.safetensors-*.safetensors")):
+        normal_name = weird_file.name.replace("model.safetensors-", "model-", 1)
+        symlink_path = snapshot_path / normal_name
+        if not symlink_path.exists():
+            try:
+                symlink_path.symlink_to(weird_file.name)
+                created.append(symlink_path)
+                console.print(
+                    f"  [green]✓[/green] Created weight symlink: {normal_name} -> {weird_file.name}"
+                )
+            except OSError:
+                pass
+        if "00001-of-00001" in weird_file.name:
+            single_path = snapshot_path / "model.safetensors"
+            if not single_path.exists():
+                try:
+                    single_path.symlink_to(weird_file.name)
+                    created.append(single_path)
+                    console.print(
+                        f"  [green]✓[/green] Created single weight symlink: model.safetensors -> {weird_file.name}"
+                    )
+                except OSError:
+                    pass
 
     return created
 
@@ -279,6 +306,28 @@ def convert_model(
 
         if output_path.exists():
             if not force:
+                meta_path = output_path / "conversion_metadata.json"
+                if meta_path.exists():
+                    try:
+                        with open(meta_path) as f:
+                            meta = json.load(f)
+                        results.append(
+                            ConversionResult(
+                                source_model=model_id,
+                                output_path=output_path,
+                                quant_bits=quant,
+                                mlx_lm_version=meta.get("mlx_lm_version", ""),
+                                conversion_time_seconds=meta.get("conversion_time_seconds", 0.0),
+                                output_size_bytes=meta.get("output_size_bytes", dir_size_bytes(output_path)),
+                                timestamp=meta.get("timestamp", now_iso()),
+                            )
+                        )
+                        console.print(
+                            f"[green]✓[/green] Reusing existing {quant_label} conversion at {output_path}"
+                        )
+                        continue
+                    except (json.JSONDecodeError, OSError, TypeError):
+                        pass
                 console.print(
                     f"[yellow]⚠ Skipping {quant_label}: "
                     f"output already exists at {output_path}. Use --force to overwrite.[/yellow]"
@@ -291,12 +340,11 @@ def convert_model(
         start_time = time.time()
 
         # Build the mlx_lm.convert command
-        # For 16-bit, we don't pass -q (no quantization)
+        # Preload optiq if installed to support custom architectures like spark2_5
         cmd = [
             sys.executable,
-            "-m",
-            "mlx_lm",
-            "convert",
+            "-c",
+            "try:\n    import optiq\nexcept Exception:\n    pass\nfrom mlx_lm.convert import main\nmain()",
             "--hf-path",
             hf_path_arg,
             "--mlx-path",
@@ -328,6 +376,19 @@ def convert_model(
         elapsed = time.time() - start_time
         output_size = dir_size_bytes(output_path)
 
+        # Build clean reproduction command for model cards
+        reproduce_cmd = [
+            "python3",
+            "-m",
+            "mlx_lm.convert",
+            "--hf-path",
+            model_id,
+            "--mlx-path",
+            f"output/{output_path.name}",
+        ]
+        if quant < 16:
+            reproduce_cmd.extend(["-q", "--q-bits", str(quant)])
+
         # Save conversion metadata
         metadata = {
             "source_model": model_id,
@@ -337,7 +398,7 @@ def convert_model(
             "conversion_time_seconds": round(elapsed, 2),
             "output_size_bytes": output_size,
             "timestamp": now_iso(),
-            "command": " ".join(["python3"] + cmd[1:]),
+            "command": " ".join(reproduce_cmd),
         }
 
         output_path.mkdir(parents=True, exist_ok=True)

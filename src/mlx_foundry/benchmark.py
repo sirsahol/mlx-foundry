@@ -62,7 +62,24 @@ def run_benchmark(
     model_path = Path(model_path)
     console.print(f"[bold blue]Benchmarking {model_path.name}...[/bold blue]")
 
+    # Check for existing benchmark results to resume without re-running
+    results_path = model_path / "benchmark_results.json"
+    if results_path.exists():
+        try:
+            with open(results_path) as f:
+                data = json.load(f)
+            console.print(f"  [green]✓[/green] Reusing existing benchmark results from {results_path}")
+            result = BenchmarkResult(**data)
+            _display_results(result)
+            return result
+        except (json.JSONDecodeError, OSError, TypeError):
+            pass
+
     # Import mlx_lm here to avoid import errors on non-Apple systems
+    try:
+        import optiq  # noqa: F401
+    except ImportError:
+        pass
     from mlx_lm import generate, load
 
     # Detect quantization from directory name or metadata
@@ -70,7 +87,11 @@ def run_benchmark(
 
     # Load model
     console.print("  Loading model...")
-    model, tokenizer = load(str(model_path))
+    model, tokenizer = load(
+        str(model_path),
+        tokenizer_config={"trust_remote_code": True},
+        model_config={"trust_remote_code": True},
+    )
 
     # Warmup runs
     console.print(f"  Running {warmup_runs} warmup generations...")
