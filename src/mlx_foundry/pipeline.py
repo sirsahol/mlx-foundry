@@ -8,7 +8,7 @@ from rich.panel import Panel
 
 from mlx_foundry.benchmark import run_benchmark
 from mlx_foundry.card import generate_model_card
-from mlx_foundry.config import DEFAULT_OUTPUT_DIR, DEFAULT_QUANTS
+from mlx_foundry.config import DEFAULT_BASE_MODEL_RELATION, DEFAULT_OUTPUT_DIR, DEFAULT_QUANTS
 from mlx_foundry.convert import convert_model
 from mlx_foundry.publish import publish_model
 from mlx_foundry.social import generate_social_posts
@@ -30,8 +30,11 @@ def format_repo_name(
     quant_label = f"{quant_bits}bit"
     if (
         model_name.endswith("-chat")
-        or backend == "mflux"
-        or any(h in model_name.lower() for h in ["image", "flux", "diffusion", "dit"])
+        or backend in {"mflux", "mlx_vlm"}
+        or any(
+            h in model_name.lower()
+            for h in ["image", "flux", "diffusion", "dit", "locateanything", "vl", "vlm", "grounding"]
+        )
     ):
         return f"{author}/{model_name}-mlx-{quant_label}"
     else:
@@ -51,6 +54,8 @@ def run_pipeline(
     force: bool = False,
     collection_slug: str | None = None,
     backend: str = "auto",
+    prune_source_cache: bool = False,
+    base_model_relation: str = DEFAULT_BASE_MODEL_RELATION,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Run the full MLX Foundry pipeline."""
@@ -84,6 +89,7 @@ def run_pipeline(
         output_dir=output_dir,
         force=force,
         backend=backend,
+        prune_source_cache=prune_source_cache,
     )
     results["conversions"] = [r.__dict__ for r in conversion_results]
 
@@ -129,6 +135,7 @@ def run_pipeline(
                 author=author,
                 benchmark_results=benchmark_results,  # All benchmarks for comparison
                 all_quant_repos=all_quant_repos,
+                base_model_relation=base_model_relation,
             )
         except Exception as e:  # noqa: BLE001
             console.print(f"[yellow]⚠ Card generation failed for {cr.quant_bits}bit: {e}[/yellow]")
@@ -146,6 +153,7 @@ def run_pipeline(
                     quant_bits=cr.quant_bits,
                     private=private,
                     cleanup=cleanup,
+                    base_model_relation=base_model_relation,
                 )
                 results["published"].append({"repo": hf_repo, "url": url})
             except Exception as e:  # noqa: BLE001

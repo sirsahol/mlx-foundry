@@ -71,6 +71,7 @@ MODELS = [
         "dir_name": "Qwen2.5-7B-Instruct-mlx-4bit",
         "metadata": {
             "source_model": SOURCE_MODEL,
+            "base_model_relation": "quantized",
             "output_path": "output/Qwen2.5-7B-Instruct-mlx-4bit",
             "quant_bits": 4,
             "mlx_lm_version": "0.31.3",
@@ -86,6 +87,7 @@ MODELS = [
         "dir_name": "Qwen2.5-7B-Instruct-mlx-8bit",
         "metadata": {
             "source_model": SOURCE_MODEL,
+            "base_model_relation": "quantized",
             "output_path": "output/Qwen2.5-7B-Instruct-mlx-8bit",
             "quant_bits": 8,
             "mlx_lm_version": "0.31.3",
@@ -101,6 +103,7 @@ MODELS = [
         "dir_name": "Qwen2.5-7B-Instruct-mlx-16bit",
         "metadata": {
             "source_model": SOURCE_MODEL,
+            "base_model_relation": "quantized",
             "output_path": "output/Qwen2.5-7B-Instruct-mlx-16bit",
             "quant_bits": 16,
             "mlx_lm_version": "0.31.3",

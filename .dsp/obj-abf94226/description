@@ -1,0 +1,3 @@
+source: wardstone
+kind: external
+purpose: Optional cross-platform ThermalResourceGovernor, SlotLease, and cache flush package.

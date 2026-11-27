@@ -1,10 +1,12 @@
 """Unit tests for MLX Foundry multi-backend architecture."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from mlx_foundry.backends import (
+    LiteRTBackend,
     MfluxBackend,
     MLXLMBackend,
     detect_backend,
@@ -78,3 +80,60 @@ def test_mflux_backend_benchmark(tmp_path: Path):
     assert result.num_runs == 3
     assert result.tokens_per_second > 0
     assert result.peak_memory_mb > 0
+
+
+def test_litert_backend_instances():
+    backend = get_backend("google/gemma-4-e2b", backend_name="litert")
+    assert isinstance(backend, LiteRTBackend)
+    assert backend.name == "litert"
+
+
+def test_litert_backend_convert_requires_compiler(tmp_path: Path):
+    backend = LiteRTBackend()
+    output_dir = tmp_path / "output"
+
+    with patch("mlx_foundry.backends.litert.importlib.util.find_spec", return_value=None):
+        with pytest.raises(RuntimeError, match="ai-edge-torch"):
+            backend.convert(
+                model_id="google/gemma-4-e2b",
+                quants=[4],
+                output_dir=output_dir,
+                force=True,
+            )
+
+    assert not (output_dir / "gemma-4-e2b-litertlm-4bit" / "gemma-4-e2b.litertlm").exists()
+
+
+def test_litert_backend_convert_writes_manifest_after_compile(tmp_path: Path):
+    backend = LiteRTBackend()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    def fake_run(cmd, **kwargs):
+        output_file = Path(cmd[-1].split("=", 1)[1])
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_bytes(b"LITERTLM real compiler output")
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    with patch("mlx_foundry.backends.litert.importlib.util.find_spec", return_value=object()):
+        with patch("mlx_foundry.backends.litert.subprocess.run", side_effect=fake_run):
+            results = backend.convert(
+                model_id="google/gemma-4-e2b",
+                quants=[4],
+                output_dir=output_dir,
+                force=True,
+            )
+
+    assert len(results) == 1
+    manifest = results[0].output_path / "litert_manifest.json"
+    assert manifest.exists()
+    assert '"status": "compiled"' in manifest.read_text()
+
+
+def test_litert_backend_benchmark_fails_closed(tmp_path: Path):
+    backend = LiteRTBackend()
+    model_dir = tmp_path / "gemma-4-e2b-litertlm-4bit"
+    model_dir.mkdir(parents=True)
+
+    with pytest.raises(NotImplementedError, match="not implemented"):
+        backend.benchmark(model_dir, runs=3)

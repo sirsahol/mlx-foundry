@@ -1,0 +1,3 @@
+source: src/mlx_foundry/card.py
+kind: object
+purpose: Publication-grade Hugging Face model card generator with Jinja2 templates.

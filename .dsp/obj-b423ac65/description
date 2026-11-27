@@ -1,0 +1,3 @@
+source: pyproject.toml
+kind: object
+purpose: Apple Silicon MLX quantization and conversion packaging manifest

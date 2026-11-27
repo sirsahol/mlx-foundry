@@ -1,0 +1,3 @@
+source: src/mlx_foundry/config.py
+kind: object
+purpose: Quantization bit-depth, cache dir, and Hugging Face upload settings

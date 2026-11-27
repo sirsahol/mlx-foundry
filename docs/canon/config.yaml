@@ -1,0 +1,16 @@
+version: "1.0.0"
+boundaries:
+  root_files:
+    - README.md
+    - CONTRIBUTING.md
+    - CHANGELOG.md
+    - SECURITY.md
+    - ONBOARDING.md
+  canon_dir: docs/canon
+  forbidden_dirs:
+    - docs/portal
+    - docs/operations
+lint_rules:
+  zero_emoji: true
+  strict_relative_links: true
+  check_schema_sync: true

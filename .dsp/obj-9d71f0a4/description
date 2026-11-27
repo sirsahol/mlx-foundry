@@ -1,0 +1,3 @@
+source: src/mlx_foundry/publish.py
+kind: object
+purpose: Hugging Face Hub repository creation, frontmatter relation tagging, and upload.

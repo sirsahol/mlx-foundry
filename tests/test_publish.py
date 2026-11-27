@@ -71,3 +71,66 @@ def test_publish_model(
         private=False,
     )
     api_instance.upload_folder.assert_called_once()
+
+
+@patch("mlx_foundry.publish.fetch_model_info")
+@patch("huggingface_hub.HfApi")
+@patch("huggingface_hub.create_repo")
+def test_publish_model_16bit_relation(
+    mock_create_repo, mock_hf_api, mock_fetch_info, tmp_path, mock_model_info
+):
+    """Test publishing 16-bit model writes base_model_relation: quantized to frontmatter."""
+    mock_fetch_info.return_value = mock_model_info
+    mock_create_repo.return_value = "https://huggingface.co/SirSahOl/test-model-16bit"
+    api_instance = MagicMock()
+    mock_hf_api.return_value = api_instance
+
+    model_dir = tmp_path / "test-model-16bit"
+    model_dir.mkdir()
+
+    publish_model(
+        model_path=model_dir,
+        hf_repo="SirSahOl/test-model-16bit",
+        source_model="test-org/test-model",
+        quant_bits=16,
+        cleanup=False,
+    )
+
+    readme = model_dir / "README.md"
+    assert readme.exists()
+    content = readme.read_text()
+    parsed = yaml.safe_load(content.split("---")[1])
+    assert parsed["base_model"] == "test-org/test-model"
+    assert parsed["base_model_relation"] == "quantized"
+
+
+@patch("mlx_foundry.publish.fetch_model_info")
+@patch("huggingface_hub.HfApi")
+@patch("huggingface_hub.create_repo")
+def test_publish_model_explicit_relation(
+    mock_create_repo, mock_hf_api, mock_fetch_info, tmp_path, mock_model_info
+):
+    """Test publishing with explicit base_model_relation override."""
+    mock_fetch_info.return_value = mock_model_info
+    mock_create_repo.return_value = "https://huggingface.co/SirSahOl/test-model-finetuned"
+    api_instance = MagicMock()
+    mock_hf_api.return_value = api_instance
+
+    model_dir = tmp_path / "test-model-finetuned"
+    model_dir.mkdir()
+
+    publish_model(
+        model_path=model_dir,
+        hf_repo="SirSahOl/test-model-finetuned",
+        source_model="test-org/test-model",
+        quant_bits=4,
+        cleanup=False,
+        base_model_relation="finetune",
+    )
+
+    readme = model_dir / "README.md"
+    assert readme.exists()
+    content = readme.read_text()
+    parsed = yaml.safe_load(content.split("---")[1])
+    assert parsed["base_model"] == "test-org/test-model"
+    assert parsed["base_model_relation"] == "finetune"

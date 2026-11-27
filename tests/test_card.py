@@ -1,5 +1,6 @@
 """Tests for model card generator module."""
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -215,3 +216,98 @@ def test_generate_model_card_sub_billion_sizing(mock_fetch_info, tmp_path: Path)
     # Sizing matrix should scale beyond 7B speeds
     assert "~35 tokens/sec" not in card_text
     assert "Apple Silicon Hardware Sizing Matrix" in card_text
+
+
+@patch("mlx_foundry.card.fetch_model_info")
+def test_generate_model_card_16bit_default_relation(mock_fetch_info, tmp_path: Path, mock_model_info):
+    """Test that 16-bit unquantized MLX conversions default to base_model_relation: quantized."""
+    mock_fetch_info.return_value = mock_model_info
+    model_dir = tmp_path / "JevK5-chat-mlx-16bit"
+    model_dir.mkdir()
+
+    card_text = generate_model_card(
+        model_path=model_dir,
+        source_model="test-org/test-model",
+        hf_repo="SirSahOl/JevK5-chat-mlx-16bit",
+        author="SirSahOl",
+    )
+
+    parts = card_text.split("---")
+    assert len(parts) >= 3
+    frontmatter = yaml.safe_load(parts[1])
+    assert frontmatter["base_model"] == "test-org/test-model"
+    assert frontmatter["base_model_relation"] == "quantized"
+
+
+@patch("mlx_foundry.card.fetch_model_info")
+def test_generate_model_card_explicit_finetune(mock_fetch_info, tmp_path: Path, mock_model_info):
+    """Test explicitly overriding base_model_relation with 'finetune'."""
+    mock_fetch_info.return_value = mock_model_info
+    model_dir = tmp_path / "test-model-finetuned-mlx-4bit"
+    model_dir.mkdir()
+
+    card_text = generate_model_card(
+        model_path=model_dir,
+        source_model="test-org/test-model",
+        hf_repo="SirSahOl/test-model-finetuned-mlx-4bit",
+        author="SirSahOl",
+        base_model_relation="finetune",
+    )
+
+    parts = card_text.split("---")
+    assert len(parts) >= 3
+    frontmatter = yaml.safe_load(parts[1])
+    assert frontmatter["base_model"] == "test-org/test-model"
+    assert frontmatter["base_model_relation"] == "finetune"
+
+
+@patch("mlx_foundry.card.fetch_model_info")
+def test_generate_model_card_explicit_adapter(mock_fetch_info, tmp_path: Path, mock_model_info):
+    """Test explicitly overriding base_model_relation with 'adapter'."""
+    mock_fetch_info.return_value = mock_model_info
+    model_dir = tmp_path / "test-model-lora-mlx-4bit"
+    model_dir.mkdir()
+
+    card_text = generate_model_card(
+        model_path=model_dir,
+        source_model="test-org/test-model",
+        hf_repo="SirSahOl/test-model-lora-mlx-4bit",
+        author="SirSahOl",
+        base_model_relation="adapter",
+    )
+
+    parts = card_text.split("---")
+    assert len(parts) >= 3
+    frontmatter = yaml.safe_load(parts[1])
+    assert frontmatter["base_model"] == "test-org/test-model"
+    assert frontmatter["base_model_relation"] == "adapter"
+
+
+@patch("mlx_foundry.card.fetch_model_info")
+def test_generate_model_card_from_conversion_metadata(mock_fetch_info, tmp_path: Path, mock_model_info):
+    """Test that base_model_relation in conversion_metadata.json is respected."""
+    mock_fetch_info.return_value = mock_model_info
+    model_dir = tmp_path / "test-model-custom-mlx-4bit"
+    model_dir.mkdir()
+
+    meta = {
+        "source_model": "test-org/test-model",
+        "output_path": str(model_dir),
+        "quant_bits": 4,
+        "base_model_relation": "finetune",
+    }
+    with open(model_dir / "conversion_metadata.json", "w") as f:
+        json.dump(meta, f)
+
+    card_text = generate_model_card(
+        model_path=model_dir,
+        source_model="test-org/test-model",
+        hf_repo="SirSahOl/test-model-custom-mlx-4bit",
+        author="SirSahOl",
+    )
+
+    parts = card_text.split("---")
+    assert len(parts) >= 3
+    frontmatter = yaml.safe_load(parts[1])
+    assert frontmatter["base_model"] == "test-org/test-model"
+    assert frontmatter["base_model_relation"] == "finetune"

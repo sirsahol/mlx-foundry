@@ -1,0 +1,3 @@
+source: src/mlx_foundry/pipeline.py
+kind: object
+purpose: Multi-stage quantization, GGUF-to-MLX, and evaluation pipeline

@@ -124,6 +124,7 @@ class MfluxBackend(BaseBackend):
                 "conversion_time_seconds": round(elapsed, 2),
                 "output_size_bytes": output_size,
                 "timestamp": now_iso(),
+                "base_model_relation": "quantized",
             }
 
             with open(output_path / "conversion_metadata.json", "w") as f:

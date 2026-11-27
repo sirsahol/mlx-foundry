@@ -1,0 +1,3 @@
+source: src/mlx_foundry/benchmark.py
+kind: object
+purpose: Throughput, TTFT, and peak RSS benchmarking with wardstone SlotLease coordination.

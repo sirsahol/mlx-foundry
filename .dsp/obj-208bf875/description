@@ -1,0 +1,3 @@
+source: src/mlx_foundry/backends/__init__.py
+kind: object
+purpose: Backend detection and dispatch registry for mlx_lm, mlx_vlm, mflux, and litert.

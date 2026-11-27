@@ -1,0 +1,3 @@
+source: src/mlx_foundry/utils.py
+kind: object
+purpose: System chip/RAM detection, disk free checks, and size/timestamp formatting helpers.

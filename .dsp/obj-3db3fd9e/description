@@ -1,0 +1,3 @@
+source: src/mlx_foundry/downloader.py
+kind: object
+purpose: Hugging Face snapshot downloader with aria2c acceleration and source cache pruning.

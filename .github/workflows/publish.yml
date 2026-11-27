@@ -7,29 +7,88 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  pypi-publish:
-    name: Build & Upload to PyPI
+  build:
+    name: Verify, Test, and Build
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/mlx-foundry
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Verify release tag matches package version
+        if: github.event_name == 'release'
+        run: |
+          python3 -c '
+          import os, tomllib
+          tag_ver = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          with open("pyproject.toml", "rb") as f:
+              pkg_ver = tomllib.load(f)["project"]["version"]
+          if tag_ver != pkg_ver:
+              raise SystemExit(f"Release tag {tag_ver!r} does not match pyproject.toml version {pkg_ver!r}")
+          print(f"Verified version {pkg_ver} matches tag.")
+          '
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Build distributions
-        run: uv build
+      - name: Install package and dev dependencies
+        run: |
+          uv venv --python 3.12
+          uv pip install --python .venv/bin/python -e ".[dev]"
+
+      - name: Lint with ruff
+        run: .venv/bin/ruff check src tests
+
+      - name: Run unit tests
+        run: .venv/bin/pytest -v
+
+      - name: Build and verify distributions
+        run: |
+          uv build
+          uvx twine check dist/*
+          python3 -c '
+          import glob, zipfile
+          for whl in glob.glob("dist/*.whl"):
+              with zipfile.ZipFile(whl) as zf:
+                  for name in zf.namelist():
+                      if name.endswith("METADATA"):
+                          text = zf.read(name).decode("utf-8")
+                          for bad in ("git+", "file://"):
+                              if bad in text:
+                                  raise SystemExit(f"Forbidden PyPI direct reference {bad!r} in {name}")
+          print("PyPI metadata check passed.")
+          '
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi-publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mlx-foundry
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

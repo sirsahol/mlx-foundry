@@ -10,7 +10,7 @@ from typing import Any
 from jinja2 import Environment, PackageLoader
 from rich.console import Console
 
-from mlx_foundry.config import BenchmarkResult
+from mlx_foundry.config import DEFAULT_BASE_MODEL_RELATION, BenchmarkResult
 from mlx_foundry.utils import fetch_model_info, format_size
 
 console = Console()
@@ -23,6 +23,7 @@ def generate_model_card(
     author: str = "SirSahOl",
     benchmark_results: list[BenchmarkResult] | None = None,
     all_quant_repos: list[dict[str, Any]] | None = None,
+    base_model_relation: str = DEFAULT_BASE_MODEL_RELATION,
 ) -> str:
     """Generate a professional model card README.md.
 
@@ -43,6 +44,7 @@ def generate_model_card(
         benchmark_results: List of BenchmarkResult objects (can include results from
             other quant levels for comparison).
         all_quant_repos: List of dicts with keys 'repo', 'quant_bits', 'url' for cross-linking.
+        base_model_relation: Hugging Face model relationship (e.g. 'quantized', 'finetune', 'adapter', 'merge').
 
     Returns:
         str: The rendered model card markdown.
@@ -140,14 +142,49 @@ def generate_model_card(
         ):
             extra_tags.append(tag)
 
-    is_diffusion = (
-        conversion_meta.get("backend") == "mflux"
-        or "diffusers" in source_info.get("tags", [])
+    is_vlm = (
+        conversion_meta.get("backend") == "mlx_vlm"
+        or source_info.get("pipeline_tag") in {
+            "image-text-to-text",
+            "visual-question-answering",
+            "document-question-answering",
+        }
         or any(
             h in source_lower or h in model_path.name.lower()
-            for h in ["image", "flux", "diffusion", "dit"]
+            for h in [
+                "locateanything",
+                "locate-anything",
+                "qwen2-vl",
+                "qwen2_vl",
+                "qwen2.5-vl",
+                "qwen2_5_vl",
+                "smolvlm",
+                "pixtral",
+                "internvl",
+                "paligemma",
+                "llava",
+            ]
         )
     )
+
+    is_diffusion = (
+        not is_vlm
+        and (
+            conversion_meta.get("backend") == "mflux"
+            or "diffusers" in source_info.get("tags", [])
+            or any(
+                h in source_lower or h in model_path.name.lower()
+                for h in ["flux", "diffusion", "dit"]
+            )
+        )
+    )
+
+    # Determine base model relation (explicit override > conversion metadata > default)
+    relation = base_model_relation
+    if relation == DEFAULT_BASE_MODEL_RELATION and conversion_meta.get("base_model_relation"):
+        relation = conversion_meta["base_model_relation"]
+    if not relation:
+        relation = DEFAULT_BASE_MODEL_RELATION
 
     # Build template context
     context = {
@@ -157,7 +194,9 @@ def generate_model_card(
         "source_info": source_info,
         "author": author,
         "quant_bits": quant_bits,
+        "base_model_relation": relation,
         "is_diffusion": is_diffusion,
+        "is_vlm": is_vlm,
         "conversion_meta": conversion_meta,
         "benchmark_results": [
             r.__dict__ if hasattr(r, "__dict__") else r for r in benchmark_results

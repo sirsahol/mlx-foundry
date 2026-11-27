@@ -23,6 +23,17 @@ DEFAULT_COLLECTION_SLUG: str = (
     "SirSahOl/mlx-models-by-sirsahol-optimized-for-apple-silicon-6aa2b239913bcab23b1ed59a"
 )
 
+# Default and valid base_model_relation values for Hugging Face Hub metadata
+DEFAULT_BASE_MODEL_RELATION: str = "quantized"
+VALID_BASE_MODEL_RELATIONS: set[str] = {
+    "quantized",
+    "finetune",
+    "adapter",
+    "merge",
+    "pretrain",
+    "continual-pretrain",
+}
+
 
 @dataclass
 class ConversionResult:
@@ -35,6 +46,7 @@ class ConversionResult:
     conversion_time_seconds: float
     output_size_bytes: int
     timestamp: str  # ISO 8601
+    base_model_relation: str = DEFAULT_BASE_MODEL_RELATION
 
 
 @dataclass
@@ -68,6 +80,7 @@ class PublishConfig:
     license: str = ""  # Inherited from source model
     tags: list[str] = field(default_factory=list)
     private: bool = False
+    base_model_relation: str = DEFAULT_BASE_MODEL_RELATION
 
 
 @dataclass
@@ -81,3 +94,4 @@ class ModelInfo:
     pipeline_tag: str
     tags: list[str] = field(default_factory=list)
     base_model: str | None = None
+    base_model_relation: str = DEFAULT_BASE_MODEL_RELATION

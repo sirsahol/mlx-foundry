@@ -7,7 +7,11 @@ import typer
 from rich.console import Console
 
 from mlx_foundry import __version__
-from mlx_foundry.config import DEFAULT_COLLECTION_SLUG, DEFAULT_OUTPUT_DIR
+from mlx_foundry.config import (
+    DEFAULT_BASE_MODEL_RELATION,
+    DEFAULT_COLLECTION_SLUG,
+    DEFAULT_OUTPUT_DIR,
+)
 
 app = typer.Typer(
     name="mlx-foundry",
@@ -65,15 +69,23 @@ def convert(
         bool, typer.Option("--force", "-f", help="Overwrite existing outputs.")
     ] = False,
     backend: Annotated[
-        str, typer.Option("--backend", "-b", help="Backend engine: auto, mlx_lm, mflux.")
+        str, typer.Option("--backend", "-b", help="Backend engine: auto, mlx_lm, mflux, mlx_vlm, litert.")
     ] = "auto",
+    prune_source_cache: Annotated[
+        bool, typer.Option("--prune-source-cache", help="Prune unquantized source model cache after conversion.")
+    ] = False,
 ):
     """Convert a HuggingFace model to MLX format at multiple quantization levels."""
     from mlx_foundry.convert import convert_model
 
     quant_list = parse_quants(quants)
     results = convert_model(
-        model_id=model, quants=quant_list, output_dir=output_dir, force=force, backend=backend
+        model_id=model,
+        quants=quant_list,
+        output_dir=output_dir,
+        force=force,
+        backend=backend,
+        prune_source_cache=prune_source_cache,
     )
 
     if results:
@@ -115,6 +127,13 @@ def card(
     author: Annotated[
         str, typer.Option("--author", "-a", help="HuggingFace username.")
     ] = "SirSahOl",
+    base_model_relation: Annotated[
+        str,
+        typer.Option(
+            "--base-model-relation",
+            help="Relationship to base model (quantized, finetune, adapter, merge).",
+        ),
+    ] = DEFAULT_BASE_MODEL_RELATION,
 ):
     """Generate a professional model card (README.md) for a converted model."""
     from mlx_foundry.card import generate_model_card
@@ -124,6 +143,7 @@ def card(
         source_model=source,
         hf_repo=repo,
         author=author,
+        base_model_relation=base_model_relation,
     )
 
 
@@ -139,6 +159,13 @@ def publish(
     no_cleanup: Annotated[
         bool, typer.Option("--no-cleanup", help="Don't delete local files after upload.")
     ] = False,
+    base_model_relation: Annotated[
+        str,
+        typer.Option(
+            "--base-model-relation",
+            help="Relationship to base model (quantized, finetune, adapter, merge).",
+        ),
+    ] = DEFAULT_BASE_MODEL_RELATION,
 ):
     """Publish a converted model to HuggingFace Hub with proper metadata."""
     from mlx_foundry.publish import publish_model
@@ -150,6 +177,7 @@ def publish(
         quant_bits=quant_bits,
         private=private,
         cleanup=not no_cleanup,
+        base_model_relation=base_model_relation,
     )
 
 
@@ -202,11 +230,21 @@ def pipeline(
         bool, typer.Option("--force", "-f", help="Overwrite existing outputs.")
     ] = False,
     backend: Annotated[
-        str, typer.Option("--backend", "-b", help="Backend engine: auto, mlx_lm, mflux.")
+        str, typer.Option("--backend", "-b", help="Backend engine: auto, mlx_lm, mflux, mlx_vlm.")
     ] = "auto",
     collection: Annotated[
         str | None, typer.Option("--collection", "-c", help="Hugging Face collection slug.")
     ] = DEFAULT_COLLECTION_SLUG,
+    prune_source_cache: Annotated[
+        bool, typer.Option("--prune-source-cache", help="Prune unquantized source model cache after pipeline completes.")
+    ] = False,
+    base_model_relation: Annotated[
+        str,
+        typer.Option(
+            "--base-model-relation",
+            help="Relationship to base model (quantized, finetune, adapter, merge).",
+        ),
+    ] = DEFAULT_BASE_MODEL_RELATION,
 ):
     """Run the full pipeline: convert → benchmark → card → publish → social."""
     from mlx_foundry.pipeline import run_pipeline
@@ -225,6 +263,8 @@ def pipeline(
         force=force,
         collection_slug=collection,
         backend=backend,
+        prune_source_cache=prune_source_cache,
+        base_model_relation=base_model_relation,
     )
 
 

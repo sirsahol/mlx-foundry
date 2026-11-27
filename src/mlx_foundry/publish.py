@@ -1,11 +1,13 @@
 """Publishing module — uploads models to HuggingFace Hub with proper metadata."""
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
 
 from rich.console import Console
 
+from mlx_foundry.config import DEFAULT_BASE_MODEL_RELATION
 from mlx_foundry.utils import fetch_model_info
 
 console = Console()
@@ -18,6 +20,7 @@ def publish_model(
     quant_bits: int,
     private: bool = False,
     cleanup: bool = True,
+    base_model_relation: str = DEFAULT_BASE_MODEL_RELATION,
 ) -> str:
     """Publish a converted MLX model to HuggingFace Hub.
 
@@ -34,6 +37,7 @@ def publish_model(
         quant_bits: Quantization level.
         private: Whether the repo should be private.
         cleanup: Whether to delete local files after successful upload.
+        base_model_relation: Relationship to base model (e.g. 'quantized', 'finetune', 'adapter', 'merge').
 
     Returns:
         str: URL of the published model.
@@ -84,6 +88,21 @@ def publish_model(
         console.print(f"[red]✗ Failed to create repo: {e}[/red]")
         raise
 
+    # Resolve base_model_relation (explicit override > conversion metadata > default)
+    relation = base_model_relation
+    if relation == DEFAULT_BASE_MODEL_RELATION:
+        meta_path = model_path / "conversion_metadata.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                    if "base_model_relation" in meta:
+                        relation = meta["base_model_relation"]
+            except (json.JSONDecodeError, OSError):
+                pass
+    if not relation:
+        relation = DEFAULT_BASE_MODEL_RELATION
+
     # Update repo metadata via model card header (YAML frontmatter)
     model_card_meta = {
         "library_name": "mlx",
@@ -91,10 +110,8 @@ def publish_model(
         "license": source_info.get("license", "unknown"),
         "tags": tags,
         "base_model": source_model,
+        "base_model_relation": relation,
     }
-
-    if quant_bits < 16:
-        model_card_meta["base_model_relation"] = "quantized"
 
     # Ensure README.md has proper YAML frontmatter
     _ensure_frontmatter(model_path, model_card_meta)

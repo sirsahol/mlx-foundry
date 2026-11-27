@@ -1,6 +1,6 @@
 # MLX Foundry
 
-[![PyPI version](https://img.shields.io/badge/pypi-v0.1.0-blue.svg)](https://pypi.org/project/mlx-foundry/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.3.0-blue.svg)](https://pypi.org/project/mlx-foundry/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%20%7C%20M2%20%7C%20M3%20%7C%20M4-black.svg)]()
@@ -11,11 +11,13 @@
 
 ## Features
 
-- ⚡ **Multi-Quantization in One Run**: Convert any HuggingFace model to 4-bit, 8-bit, and 16-bit MLX format.
-- 📊 **Automated Benchmarking**: Profile tokens/second, time to first token (TTFT), and peak memory usage on Apple Silicon unified memory.
-- 📝 **Professional Model Cards**: Generate publication-ready HuggingFace model cards featuring reproducible commands, benchmark tables, and hardware guides.
-- 🤗 **One-Command Hub Publishing**: Create repositories, assign appropriate tags (`mlx`, `safetensors`, `conversational`, etc.), and upload with automatic cleanup.
-- 📣 **Social Post Generation**: Instantly create ready-to-share summaries formatted for X/Twitter and Reddit (`r/LocalLLaMA`).
+- **Multi-Quantization in One Run**: Convert any HuggingFace model to 4-bit, 8-bit, and 16-bit MLX format.
+- **Automated Benchmarking**: Profile tokens/second, time to first token (TTFT), and peak memory usage on Apple Silicon unified memory.
+- **Professional Model Cards**: Generate publication-ready HuggingFace model cards featuring reproducible commands, benchmark tables, and hardware guides.
+- **One-Command Hub Publishing**: Create repositories, assign appropriate tags (`mlx`, `safetensors`, `conversational`, etc.), and upload with automatic cleanup.
+- **Social Post Generation**: Instantly create ready-to-share summaries formatted for X/Twitter and Reddit (`r/LocalLLaMA`).
+- **Optional LiteRT-LM Export**: Compile Gemma, Llama, Qwen, and Phi checkpoints to Google AI Edge `.litertlm` flatbuffers when `ai-edge-torch` is installed. The backend fails closed if the compiler is absent; it never writes placeholder weights or invented benchmark numbers.
+- **Hardware-Governed Single-Slot Execution**: Integrates `wardstone` (`ThermalResourceGovernor` and `SlotLease`) to protect Unified Memory and coordinate Metal GPU ownership cleanly.
 
 ---
 
@@ -24,6 +26,7 @@
 - **macOS** with Apple Silicon (M1/M2/M3/M4)
 - **Python >= 3.10**
 - `mlx-lm` and HuggingFace credentials (`hf auth login`)
+- Optional for LiteRT export: `ai-edge-torch` and `mediapipe-genai`
 
 ---
 
@@ -67,6 +70,29 @@ mlx-foundry pipeline \
 
 ---
 
+## Backends
+
+| Backend | Use | Notes |
+|---|---|---|
+| `auto` | Default | Detects `mlx_vlm` for multimodal models, `mflux` for diffusion, otherwise `mlx_lm` |
+| `mlx_lm` | Causal LLMs | Apple MLX weights via `mlx-lm` |
+| `mlx_vlm` | Multimodal models | Vision-language MLX weights |
+| `mflux` | Diffusion transformers | Image generation models |
+| `litert` | Google AI Edge | Explicit only; requires `ai-edge-torch`; benchmark is not implemented |
+
+`litert` is never selected by `auto`. Convert with:
+
+```bash
+pip install ai-edge-torch mediapipe-genai
+mlx-foundry convert --model google/gemma-4-e2b --quants 4,8 --backend litert
+```
+
+If the compiler is missing or fails, the command exits with an error and writes
+no weights. A successful run writes the `.litertlm` artifact plus
+`litert_manifest.json` with `"status": "compiled"`.
+
+---
+
 ## Commands Reference
 
 ### 1. `pipeline`
@@ -94,6 +120,13 @@ Convert models to specified quantization levels.
 ```bash
 mlx-foundry convert --model Qwen/Qwen3-0.6B --quants 4,8,16 --output ./output
 ```
+
+Options:
+- `-m, --model`: HuggingFace model ID (required).
+- `-q, --quants`: Comma-separated quantization levels.
+- `-o, --output`: Base output directory.
+- `-b, --backend`: `auto`, `mlx_lm`, `mlx_vlm`, `mflux`, or `litert`.
+- `-f, --force`: Overwrite existing outputs.
 
 ### 3. `benchmark`
 Measure throughput (tokens/sec), first-token latency, and memory footprint.

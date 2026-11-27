@@ -40,3 +40,16 @@ batch_progress.json
 .workflow_state/
 AGENTS.md
 agents.md
+
+# Unified Agent Control Plane
+.agent/session_skills/
+.research_state/
+hf_tmp/
+
+# DSP & Graphify caches
+.dsp/.cache/
+graphify-out/cache/
+graphify-out/.graphify_*
+graphify-out/.cloud-cta-shown
+graphify-out/graph.html
+

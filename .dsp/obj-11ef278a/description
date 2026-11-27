@@ -1,0 +1,3 @@
+source: src/mlx_foundry/cli.py
+kind: object
+purpose: Command-line interface for MLX batch model conversion and testing

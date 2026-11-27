@@ -1,0 +1,3 @@
+source: src/mlx_foundry/convert.py
+kind: object
+purpose: Model conversion pipeline supporting mlx-lm and multi-backend dispatch with wardstone SlotLease.

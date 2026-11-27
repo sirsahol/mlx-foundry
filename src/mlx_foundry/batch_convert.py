@@ -69,14 +69,13 @@ def start_prefetch(model_id: str, cache_dir: Path | str | None = None) -> thread
                 )
                 return
 
-            from huggingface_hub import snapshot_download
+            from mlx_foundry.downloader import download_model_snapshot
 
             console.print(
                 f"[cyan]▸ [Prefetch] Starting concurrent background download for {model_id}...[/cyan]"
             )
-            snapshot_download(
+            download_model_snapshot(
                 model_id,
-                cache_dir=str(cache_dir) if cache_dir else None,
                 ignore_patterns=[
                     "*.onnx",
                     "*.bin",

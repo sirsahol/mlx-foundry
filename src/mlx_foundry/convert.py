@@ -1,5 +1,6 @@
 """Model conversion module — converts HuggingFace models to MLX format."""
 
+import gc
 import json
 import shutil
 import subprocess
@@ -8,6 +9,17 @@ import time
 from pathlib import Path
 
 from rich.console import Console
+
+try:
+    from wardstone.governor import SlotLease, ThermalResourceGovernor, flush_accelerator_cache
+except ImportError:  # pragma: no cover - optional hardware governance extension
+    ThermalResourceGovernor = None  # type: ignore[assignment,misc]
+    SlotLease = None  # type: ignore[assignment,misc]
+
+    def flush_accelerator_cache() -> dict[str, bool]:
+        """Fallback accelerator cache flush when wardstone is not installed."""
+        gc.collect()
+        return {"gc_collected": True, "mlx_cleared": False, "torch_cuda_cleared": False}
 
 from mlx_foundry.config import (
     DEFAULT_OUTPUT_DIR,
@@ -234,6 +246,7 @@ def convert_model(
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     force: bool = False,
     backend: str = "auto",
+    prune_source_cache: bool = False,
 ) -> list[ConversionResult]:
     """Convert a HuggingFace model to MLX format at multiple quantization levels.
 
@@ -245,181 +258,208 @@ def convert_model(
     from mlx_foundry.backends import get_backend
 
     resolved_backend = get_backend(model_id, backend)
-    if resolved_backend.name == "mflux":
-        return resolved_backend.convert(
-            model_id=model_id, quants=quants, output_dir=output_dir, force=force
-        )
+    if resolved_backend.name not in {"mflux", "mlx_vlm", "litert"}:
+        validate_quants(quants)
 
-    validate_quants(quants)
+    if ThermalResourceGovernor is not None:
+        telemetry = ThermalResourceGovernor().inspect()
+        console.print(f"[dim]Hardware governor ({telemetry['profile']}): {telemetry['badge']}[/dim]")
+        if telemetry.get("immediate_unload_required"):
+            console.print(
+                "[yellow]Warning: Critical thermal or memory pressure detected; flushing accelerator cache.[/yellow]"
+            )
+            flush_accelerator_cache()
 
-    # Extract model short name for output directory naming
-    model_name = model_id.split("/")[-1]
-
-    # Check disk space
-    required_gb = estimate_required_space_gb(model_id, quants)
-    available_gb = get_disk_free_gb(
-        output_dir.parent if output_dir.parent.exists() else Path.home()
-    )
-
-    if available_gb < required_gb:
-        raise RuntimeError(
-            f"Insufficient disk space. Need ~{required_gb:.1f}GB, have {available_gb:.1f}GB free."
-        )
-
-    console.print(
-        f"[green]✓[/green] Disk space check passed: "
-        f"need ~{required_gb:.1f}GB, have {available_gb:.1f}GB free"
-    )
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    results: list[ConversionResult] = []
-
-    hf_path_arg = model_id
+    lease = SlotLease() if SlotLease is not None else None
+    if lease is not None:
+        lease.acquire(owner="mlx-foundry", model=model_id, preempt_sidecar=True)
     try:
-        from huggingface_hub import snapshot_download
+        if resolved_backend.name in {"mflux", "mlx_vlm", "litert"}:
+            results = resolved_backend.convert(
+                model_id=model_id, quants=quants, output_dir=output_dir, force=force
+            )
+            if prune_source_cache and results:
+                from mlx_foundry.downloader import prune_source_cache as do_prune
 
-        snapshot_result = snapshot_download(
-            model_id,
-            ignore_patterns=[
-                "*.onnx",
-                "*.onnx_data",
-                "*.bin",
-                "*.pt",
-                "onnx/*",
-                "*.msgpack",
-                "*.h5",
-                "*.tflite",
-                "*.ot",
-            ],
+                do_prune(model_id)
+            return results
+
+        # Extract model short name for output directory naming
+        model_name = model_id.split("/")[-1]
+
+        # Check disk space
+        required_gb = estimate_required_space_gb(model_id, quants)
+        available_gb = get_disk_free_gb(
+            output_dir.parent if output_dir.parent.exists() else Path.home()
         )
-        if snapshot_result:
-            snapshot_path = Path(snapshot_result)
-            if snapshot_path.is_dir():
-                ensure_safetensors_symlinks(snapshot_path)
-                hf_path_arg = str(snapshot_path)
-    except Exception as e:  # noqa: BLE001
-        console.print(f"[yellow]Warning: Pre-download snapshot check skipped: {e}[/yellow]")
 
-    for quant in sorted(quants):
-        quant_label = f"{quant}bit"
-        output_path = output_dir / f"{model_name}-mlx-{quant_label}"
-
-        if output_path.exists():
-            if not force:
-                meta_path = output_path / "conversion_metadata.json"
-                if meta_path.exists():
-                    try:
-                        with open(meta_path) as f:
-                            meta = json.load(f)
-                        results.append(
-                            ConversionResult(
-                                source_model=model_id,
-                                output_path=output_path,
-                                quant_bits=quant,
-                                mlx_lm_version=meta.get("mlx_lm_version", ""),
-                                conversion_time_seconds=meta.get("conversion_time_seconds", 0.0),
-                                output_size_bytes=meta.get("output_size_bytes", dir_size_bytes(output_path)),
-                                timestamp=meta.get("timestamp", now_iso()),
-                            )
-                        )
-                        console.print(
-                            f"[green]✓[/green] Reusing existing {quant_label} conversion at {output_path}"
-                        )
-                        continue
-                    except (json.JSONDecodeError, OSError, TypeError):
-                        pass
-                console.print(
-                    f"[yellow]⚠ Skipping {quant_label}: "
-                    f"output already exists at {output_path}. Use --force to overwrite.[/yellow]"
-                )
-                continue
-            shutil.rmtree(output_path)
-
-        console.print(f"\n[bold blue]Converting {model_id} to {quant_label}...[/bold blue]")
-
-        start_time = time.time()
-
-        # Build the mlx_lm.convert command
-        # Preload optiq if installed to support custom architectures like spark2_5
-        cmd = [
-            sys.executable,
-            "-c",
-            "try:\n    import optiq\nexcept Exception:\n    pass\nfrom mlx_lm.convert import main\nmain()",
-            "--hf-path",
-            hf_path_arg,
-            "--mlx-path",
-            str(output_path),
-        ]
-
-        if quant < 16:
-            cmd.extend(["-q", "--q-bits", str(quant)])
-
-        # Run the conversion
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=3600,  # 1 hour timeout
-                check=False,
+        if available_gb < required_gb:
+            raise RuntimeError(
+                f"Insufficient disk space. Need ~{required_gb:.1f}GB, have {available_gb:.1f}GB free."
             )
 
-            if result.returncode != 0:
-                console.print(f"[red]✗ Conversion failed for {quant_label}[/red]")
-                console.print(f"[red]stderr: {result.stderr}[/red]")
+        console.print(
+            f"[green]✓[/green] Disk space check passed: "
+            f"need ~{required_gb:.1f}GB, have {available_gb:.1f}GB free"
+        )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        results: list[ConversionResult] = []
+
+        hf_path_arg = model_id
+        try:
+            from mlx_foundry.downloader import download_model_snapshot
+
+            snapshot_path = download_model_snapshot(
+                model_id,
+                ignore_patterns=[
+                    "*.onnx",
+                    "*.onnx_data",
+                    "*.bin",
+                    "*.pt",
+                    "onnx/*",
+                    "*.msgpack",
+                    "*.h5",
+                    "*.tflite",
+                    "*.ot",
+                ],
+            )
+            if snapshot_path and snapshot_path.is_dir():
+                ensure_safetensors_symlinks(snapshot_path)
+                hf_path_arg = str(snapshot_path)
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[yellow]Warning: Pre-download snapshot check skipped: {e}[/yellow]")
+
+        for quant in sorted(quants):
+            quant_label = f"{quant}bit"
+            output_path = output_dir / f"{model_name}-mlx-{quant_label}"
+
+            if output_path.exists():
+                if not force:
+                    meta_path = output_path / "conversion_metadata.json"
+                    if meta_path.exists():
+                        try:
+                            with open(meta_path) as f:
+                                meta = json.load(f)
+                            results.append(
+                                ConversionResult(
+                                    source_model=model_id,
+                                    output_path=output_path,
+                                    quant_bits=quant,
+                                    mlx_lm_version=meta.get("mlx_lm_version", ""),
+                                    conversion_time_seconds=meta.get("conversion_time_seconds", 0.0),
+                                    output_size_bytes=meta.get("output_size_bytes", dir_size_bytes(output_path)),
+                                    timestamp=meta.get("timestamp", now_iso()),
+                                )
+                            )
+                            console.print(
+                                f"[green]✓[/green] Reusing existing {quant_label} conversion at {output_path}"
+                            )
+                            continue
+                        except (json.JSONDecodeError, OSError, TypeError):
+                            pass
+                    console.print(
+                        f"[yellow]⚠ Skipping {quant_label}: "
+                        f"output already exists at {output_path}. Use --force to overwrite.[/yellow]"
+                    )
+                    continue
+                shutil.rmtree(output_path)
+
+            console.print(f"\n[bold blue]Converting {model_id} to {quant_label}...[/bold blue]")
+
+            start_time = time.time()
+
+            # Build the mlx_lm.convert command
+            # Preload optiq if installed to support custom architectures like spark2_5
+            cmd = [
+                sys.executable,
+                "-c",
+                "try:\n    import optiq\nexcept Exception:\n    pass\nfrom mlx_lm.convert import main\nmain()",
+                "--hf-path",
+                hf_path_arg,
+                "--mlx-path",
+                str(output_path),
+            ]
+
+            if quant < 16:
+                cmd.extend(["-q", "--q-bits", str(quant)])
+
+            # Run the conversion
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=3600,  # 1 hour timeout
+                    check=False,
+                )
+
+                if result.returncode != 0:
+                    console.print(f"[red]✗ Conversion failed for {quant_label}[/red]")
+                    console.print(f"[red]stderr: {result.stderr}[/red]")
+                    continue
+
+            except subprocess.TimeoutExpired:
+                console.print(f"[red]✗ Conversion timed out for {quant_label}[/red]")
                 continue
 
-        except subprocess.TimeoutExpired:
-            console.print(f"[red]✗ Conversion timed out for {quant_label}[/red]")
-            continue
+            elapsed = time.time() - start_time
+            output_size = dir_size_bytes(output_path)
 
-        elapsed = time.time() - start_time
-        output_size = dir_size_bytes(output_path)
+            # Build clean reproduction command for model cards
+            reproduce_cmd = [
+                "python3",
+                "-m",
+                "mlx_lm.convert",
+                "--hf-path",
+                model_id,
+                "--mlx-path",
+                f"output/{output_path.name}",
+            ]
+            if quant < 16:
+                reproduce_cmd.extend(["-q", "--q-bits", str(quant)])
 
-        # Build clean reproduction command for model cards
-        reproduce_cmd = [
-            "python3",
-            "-m",
-            "mlx_lm.convert",
-            "--hf-path",
-            model_id,
-            "--mlx-path",
-            f"output/{output_path.name}",
-        ]
-        if quant < 16:
-            reproduce_cmd.extend(["-q", "--q-bits", str(quant)])
+            # Save conversion metadata
+            metadata = {
+                "source_model": model_id,
+                "output_path": str(output_path),
+                "quant_bits": quant,
+                "mlx_lm_version": get_mlx_lm_version(),
+                "conversion_time_seconds": round(elapsed, 2),
+                "output_size_bytes": output_size,
+                "timestamp": now_iso(),
+                "command": " ".join(reproduce_cmd),
+                "base_model_relation": "quantized",
+            }
 
-        # Save conversion metadata
-        metadata = {
-            "source_model": model_id,
-            "output_path": str(output_path),
-            "quant_bits": quant,
-            "mlx_lm_version": get_mlx_lm_version(),
-            "conversion_time_seconds": round(elapsed, 2),
-            "output_size_bytes": output_size,
-            "timestamp": now_iso(),
-            "command": " ".join(reproduce_cmd),
-        }
+            output_path.mkdir(parents=True, exist_ok=True)
+            metadata_path = output_path / "conversion_metadata.json"
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=2)
 
-        output_path.mkdir(parents=True, exist_ok=True)
-        metadata_path = output_path / "conversion_metadata.json"
-        with open(metadata_path, "w") as f:
-            json.dump(metadata, f, indent=2)
+            conversion_result = ConversionResult(
+                source_model=model_id,
+                output_path=output_path,
+                quant_bits=quant,
+                mlx_lm_version=get_mlx_lm_version(),
+                conversion_time_seconds=round(elapsed, 2),
+                output_size_bytes=output_size,
+                timestamp=now_iso(),
+            )
+            results.append(conversion_result)
 
-        conversion_result = ConversionResult(
-            source_model=model_id,
-            output_path=output_path,
-            quant_bits=quant,
-            mlx_lm_version=get_mlx_lm_version(),
-            conversion_time_seconds=round(elapsed, 2),
-            output_size_bytes=output_size,
-            timestamp=now_iso(),
-        )
-        results.append(conversion_result)
+            console.print(
+                f"[green]✓[/green] {quant_label} complete in {elapsed:.1f}s "
+                f"({format_size(output_size)})"
+            )
 
-        console.print(
-            f"[green]✓[/green] {quant_label} complete in {elapsed:.1f}s "
-            f"({format_size(output_size)})"
-        )
+        if prune_source_cache and results:
+            from mlx_foundry.downloader import prune_source_cache as do_prune
 
-    return results
+            do_prune(model_id)
+
+        return results
+    finally:
+        if lease is not None:
+            lease.release(owner="mlx-foundry")
+        flush_accelerator_cache()

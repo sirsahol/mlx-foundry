@@ -1,5 +1,6 @@
 """Benchmarking module — measures performance of converted MLX models."""
 
+import gc
 import json
 import statistics
 import time
@@ -8,6 +9,17 @@ from pathlib import Path
 import psutil
 from rich.console import Console
 from rich.table import Table
+
+try:
+    from wardstone.governor import SlotLease, ThermalResourceGovernor, flush_accelerator_cache
+except ImportError:  # pragma: no cover - optional hardware governance extension
+    ThermalResourceGovernor = None  # type: ignore[assignment,misc]
+    SlotLease = None  # type: ignore[assignment,misc]
+
+    def flush_accelerator_cache() -> dict[str, bool]:
+        """Fallback accelerator cache flush when wardstone is not installed."""
+        gc.collect()
+        return {"gc_collected": True, "mlx_cleared": False, "torch_cuda_cleared": False}
 
 from mlx_foundry.config import (
     BENCHMARK_EVAL_RUNS,
@@ -75,90 +87,126 @@ def run_benchmark(
         except (json.JSONDecodeError, OSError, TypeError):
             pass
 
-    # Import mlx_lm here to avoid import errors on non-Apple systems
+    if ThermalResourceGovernor is not None:
+        telemetry = ThermalResourceGovernor().inspect()
+        console.print(f"  [dim]Governor ({telemetry['profile']}): {telemetry['badge']}[/dim]")
+        if telemetry.get("immediate_unload_required"):
+            console.print(
+                "  [yellow]Warning: Critical thermal or memory pressure detected; flushing accelerator cache.[/yellow]"
+            )
+            flush_accelerator_cache()
+
+    lease = SlotLease() if SlotLease is not None else None
+    if lease is not None:
+        lease.acquire(owner="mlx-foundry", model=str(model_path), preempt_sidecar=True)
     try:
-        import optiq  # noqa: F401
-    except ImportError:
-        pass
-    from mlx_lm import generate, load
+        # Dispatch to backend-specific benchmark if conversion_metadata specifies mlx_vlm or mflux
+        meta_path = model_path / "conversion_metadata.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                backend_name = meta.get("backend")
+                if backend_name in {"mlx_vlm", "mflux"}:
+                    from mlx_foundry.backends import get_backend
 
-    # Detect quantization from directory name or metadata
-    quant_bits = _detect_quant_bits(model_path)
+                    backend_instance = get_backend(str(model_path), backend_name)
+                    result = backend_instance.benchmark(model_path, runs=eval_runs)
+                    with open(results_path, "w") as f:
+                        json.dump(result.__dict__, f, indent=2)
+                    _display_results(result)
+                    return result
+            except Exception as e:  # noqa: BLE001
+                console.print(f"  [yellow]⚠ Backend-specific benchmark dispatch warning: {e}[/yellow]")
 
-    # Load model
-    console.print("  Loading model...")
-    model, tokenizer = load(
-        str(model_path),
-        tokenizer_config={"trust_remote_code": True},
-        model_config={"trust_remote_code": True},
-    )
+        # Import mlx_lm here to avoid import errors on non-Apple systems
+        try:
+            import optiq  # noqa: F401
+        except ImportError:
+            pass
+        from mlx_lm import generate, load
 
-    # Warmup runs
-    console.print(f"  Running {warmup_runs} warmup generations...")
-    for _ in range(warmup_runs):
-        generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
+        # Detect quantization from directory name or metadata
+        quant_bits = _detect_quant_bits(model_path)
 
-    # Evaluation runs
-    console.print(f"  Running {eval_runs} evaluation generations...")
-    tok_per_sec_list: list[float] = []
-    ttft_list: list[float] = []
+        # Load model
+        console.print("  Loading model...")
+        model, tokenizer = load(
+            str(model_path),
+            tokenizer_config={"trust_remote_code": True},
+            model_config={"trust_remote_code": True},
+        )
 
-    for i in range(eval_runs):
-        start = time.perf_counter()
-        response = generate(
-            model,
-            tokenizer,
+        # Warmup runs
+        console.print(f"  Running {warmup_runs} warmup generations...")
+        for _ in range(warmup_runs):
+            generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
+
+        # Evaluation runs
+        console.print(f"  Running {eval_runs} evaluation generations...")
+        tok_per_sec_list: list[float] = []
+        ttft_list: list[float] = []
+
+        for i in range(eval_runs):
+            start = time.perf_counter()
+            response = generate(
+                model,
+                tokenizer,
+                prompt=prompt,
+                max_tokens=max_tokens,
+                verbose=False,
+            )
+            end = time.perf_counter()
+
+            elapsed = max(end - start, 1e-6)
+
+            try:
+                tokens_generated = len(tokenizer.encode(response)) - len(tokenizer.encode(prompt))
+            except Exception:  # noqa: BLE001
+                tokens_generated = len(response.split())
+
+            if tokens_generated <= 0:
+                tokens_generated = max_tokens
+
+            tps = tokens_generated / elapsed
+            tok_per_sec_list.append(tps)
+
+            # TTFT approximation: total_time / total_tokens * 1 (first token latency)
+            ttft_approx = (elapsed / tokens_generated) * 1000.0  # ms
+            ttft_list.append(ttft_approx)
+
+            console.print(f"    Run {i + 1}/{eval_runs}: {tps:.1f} tok/s")
+
+        mem_peak = measure_peak_memory_mb()
+
+        result = BenchmarkResult(
+            model_path=str(model_path),
+            chip=get_chip_name(),
+            memory_gb=get_system_memory_gb(),
+            quant_bits=quant_bits,
+            tokens_per_second=round(statistics.mean(tok_per_sec_list), 2) if tok_per_sec_list else 0.0,
+            time_to_first_token_ms=round(statistics.mean(ttft_list), 2) if ttft_list else 0.0,
+            peak_memory_mb=round(mem_peak, 1),
             prompt=prompt,
             max_tokens=max_tokens,
-            verbose=False,
+            num_runs=eval_runs,
+            timestamp=now_iso(),
         )
-        end = time.perf_counter()
 
-        elapsed = max(end - start, 1e-6)
+        # Save benchmark results to JSON
+        results_path = model_path / "benchmark_results.json"
+        with open(results_path, "w") as f:
+            json.dump(result.__dict__, f, indent=2)
 
-        try:
-            tokens_generated = len(tokenizer.encode(response)) - len(tokenizer.encode(prompt))
-        except Exception:  # noqa: BLE001
-            tokens_generated = len(response.split())
+        # Display results table
+        _display_results(result)
 
-        if tokens_generated <= 0:
-            tokens_generated = max_tokens
-
-        tps = tokens_generated / elapsed
-        tok_per_sec_list.append(tps)
-
-        # TTFT approximation: total_time / total_tokens * 1 (first token latency)
-        ttft_approx = (elapsed / tokens_generated) * 1000.0  # ms
-        ttft_list.append(ttft_approx)
-
-        console.print(f"    Run {i + 1}/{eval_runs}: {tps:.1f} tok/s")
-
-    mem_peak = measure_peak_memory_mb()
-
-    result = BenchmarkResult(
-        model_path=str(model_path),
-        chip=get_chip_name(),
-        memory_gb=get_system_memory_gb(),
-        quant_bits=quant_bits,
-        tokens_per_second=round(statistics.mean(tok_per_sec_list), 2) if tok_per_sec_list else 0.0,
-        time_to_first_token_ms=round(statistics.mean(ttft_list), 2) if ttft_list else 0.0,
-        peak_memory_mb=round(mem_peak, 1),
-        prompt=prompt,
-        max_tokens=max_tokens,
-        num_runs=eval_runs,
-        timestamp=now_iso(),
-    )
-
-    # Save benchmark results to JSON
-    results_path = model_path / "benchmark_results.json"
-    with open(results_path, "w") as f:
-        json.dump(result.__dict__, f, indent=2)
-
-    # Display results table
-    _display_results(result)
-
-    console.print(f"[green]✓[/green] Benchmark results saved to {results_path}")
-    return result
+        console.print(f"[green]✓[/green] Benchmark results saved to {results_path}")
+        return result
+    finally:
+        if lease is not None:
+            lease.release(owner="mlx-foundry")
+        flush_accelerator_cache()
 
 
 def _detect_quant_bits(model_path: Path) -> int:

@@ -3,9 +3,7 @@ library_name: mlx
 pipeline_tag: {{ source_info.get('pipeline_tag', 'text-generation') }}
 license: {{ source_info.get('license', 'unknown') }}
 base_model: {{ source_model }}
-{% if quant_bits < 16 %}
-base_model_relation: quantized
-{% endif %}
+base_model_relation: {{ base_model_relation | default('quantized') }}
 tags:
   - mlx
   - safetensors
@@ -43,6 +41,11 @@ tags:
 *   **Quantization**: {{ quant_bits }}-bit (Average {{ model_details.get('avg_bits_per_weight', quant_bits ~ '.00') }} bits per weight)
 *   **Active VRAM Footprint**: ~{{ model_details.get('vram_footprint', model_size) }} (Minimum recommended: {{ model_details.get('min_ram', '16 GB Unified Memory') }})
 
+{% if is_vlm %}
+*   **Mixed Precision Strategy**: Language backbone: {{ quant_bits }}-bit affine; Vision encoder: BF16 unquantized (maintains sub-pixel coordinate alignment for visual grounding)
+*   **Coordinate Output Format**: Normalized `[ymin, xmin, ymax, xmax]` in `[0, 1000]` range
+{% endif %}
+
 ---
 
 ## Quick Start
@@ -52,6 +55,8 @@ tags:
 ```bash
 {% if is_diffusion %}
 pip install mflux
+{% elif is_vlm %}
+pip install mlx-vlm
 {% else %}
 pip install mlx-lm
 {% endif %}
@@ -63,6 +68,42 @@ pip install mlx-lm
 ```bash
 # Generate image from text prompt
 mflux-generate-qwen --model {{ hf_repo }} --prompt "A serene landscape at dusk with cinematic lighting"
+```
+{% elif is_vlm %}
+#### CLI
+
+```bash
+# Generate visual grounding completion
+python -m mlx_vlm.generate --model {{ hf_repo }} --image screenshot.png --prompt "locate: submit button"
+```
+
+#### Python API (LocateAnything / Visual Grounding)
+
+```python
+from mlx_vlm import load, generate
+from mlx_vlm.utils import load_image
+
+# Load model natively onto Apple Silicon GPU (Metal)
+model, processor = load("{{ hf_repo }}")
+
+prompt = "locate: submit button"
+image_path = "screenshot.png"
+
+# Format messages using the Qwen/LocateAnything vision template
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "image"},
+            {"type": "text", "text": prompt}
+        ]
+    }
+]
+formatted_prompt = processor.apply_chat_template(messages, add_generation_prompt=True)
+
+# Generate bounding box coordinates [ymin, xmin, ymax, xmax] normalized 0-1000
+result = generate(model, processor, prompt=formatted_prompt, image=image_path, verbose=False)
+print("Detected bounding box:", result.text)
 ```
 {% else %}
 #### CLI

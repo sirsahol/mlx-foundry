@@ -1,0 +1,3 @@
+source: src/mlx_foundry/social.py
+kind: object
+purpose: Social media announcement generator for X/Twitter and Reddit.
